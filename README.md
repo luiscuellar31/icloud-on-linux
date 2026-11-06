@@ -1,57 +1,69 @@
-# iCloud on Linux
+<div align='center'>
+  <h1>iCloud on Linux</h1>
 
-A prototype for accessing iCloud Drive from Linux and opening its files in the
-file manager. It uses rclone 1.75.2 and provides a Docker terminal lab and a
-**read-only** FUSE mount on Ubuntu 24.04 with GNOME/Nautilus.
+  <p><strong>A native iCloud Drive client for the Linux desktop.</strong></p>
+</div>
 
-The lab has verified sign-in with 2FA, reuse of the encrypted session, listings,
-and downloads. Ubuntu checks also covered access from Files, the read-only mount,
-and the integrity of a downloaded file.
+iCloud on Linux aims to make your iCloud Drive files part of your everyday Linux
+workflow. The goal is to browse, manage, and sync them from GNOME Files and KDE
+Dolphin, so you can use the iCloud storage you already have without leaving Linux.
 
-## Open the lab
+The project is in early development. You can already browse and open files in
+Ubuntu with GNOME, using rclone to connect to your account.
 
-For the local **Ubuntu-iCloud** VM already prepared on this machine, open
-[open-ubuntu.command](open-ubuntu.command) from macOS. In Ubuntu, launch
-**iCloud Drive** and enter your local key to open `~/iCloud` in Files.
-The launcher needs the private configuration in `.vm/`; cloning this repository
-does not create the machine. The [Ubuntu Desktop guide](docs/UBUNTU_DESKTOP.md)
-covers its use and manual setup on another Ubuntu system.
+## Features
 
-To explore and download files from a terminal, start Docker and open
-[start.command](start.command), or run this from the repository root:
+- Sign in with your Apple account and two-factor authentication.
+- Browse iCloud Drive in GNOME Files and open files with your usual apps.
+- Download files when you open them and keep a local cache.
+- Reuse your saved session, encrypted with a separate local key.
+- List and download files from a terminal through the Docker environment.
+
+The current file manager mount is read-only. Uploads, editing, synchronization,
+and KDE support are planned.
+
+## Try it
+
+### Ubuntu Desktop
+
+The [Ubuntu Desktop guide](docs/UBUNTU_DESKTOP.md) walks through installing rclone,
+signing in, and opening iCloud Drive as the folder `~/iCloud` in Files. The tested
+setup is Ubuntu 24.04 with GNOME.
+
+### Docker
+
+With Docker running on macOS or Linux:
 
 ```sh
+git clone https://github.com/luiscuellar31/icloud-on-linux.git
+cd icloud-on-linux
 ./start.command
 ```
 
-The assistant asks for a local key to protect the saved session. On first use,
-it also requests the Apple account and 2FA in your terminal. Listing, download,
-and file extraction commands are in the [Docker guide](docs/DOCKER.md).
+The launcher builds the environment and asks for a local key to protect your saved
+session. On first use, it also asks for your Apple account, password, and 2FA code
+in your terminal. The local key is separate from your Apple password.
 
-## Current scope
+Once connected, you can list and download files. Type `exit` to close the session;
+your encrypted configuration stays in the Docker volume for the next run. See
+the [Docker guide](docs/DOCKER.md) for the commands and download steps.
 
-The integration supports browsing and opening files; uploads, edits, and deletions
-are disabled on the mount. Caching opened files does not keep all of iCloud
-available offline. The mount stays active when Files closes; the Ubuntu guide
-explains how to unmount it.
+## Roadmap
 
-The next functional work is to test writes with disposable data and an agreed
-scope, including reconnection and conflicts. A dedicated native interface,
-installation packages, and Fedora or Debian tests with KDE/Dolphin remain pending.
+- Upload, edit, move, and delete files from the file manager.
+- Keep folders in sync and handle conflicts and interrupted connections.
+- Add a native app for sign-in, connection status, and mounting controls.
+- Package and test the app for Ubuntu, Fedora, and Debian with GNOME and KDE.
 
-## Documentation and development
+## Documentation and contributions
 
-| Document | Contents |
-| --- | --- |
-| [AGENTS.md](AGENTS.md) | Brief rules for working in the repository. |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Change workflow, checks, data protection, and commit conventions. |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Responsibilities, authentication, mounting, and persistence. |
-| [docs/DOCKER.md](docs/DOCKER.md) | Sign-in, listings, and downloads from a terminal. |
-| [docs/UBUNTU_DESKTOP.md](docs/UBUNTU_DESKTOP.md) | VM usage and manual setup on Ubuntu Desktop. |
+- [Using iCloud Drive on Ubuntu](docs/UBUNTU_DESKTOP.md)
+- [Using the Docker environment](docs/DOCKER.md)
+- [Architecture and local data](docs/ARCHITECTURE.md)
 
-Automated checks use local data and do not need an Apple account. Credentials,
-the VM, and personal downloads stay outside Git.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening
+a pull request. Automated tests use local files and do not need an Apple account.
 
 ## License
 
-[MIT](LICENSE).
+iCloud on Linux is available under the [MIT License](LICENSE).
