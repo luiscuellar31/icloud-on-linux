@@ -83,7 +83,12 @@ Dockerfile and the session script needed by the image to the builder.
   binary against local files during the build.
 - [tests/check-linux-mount.sh](../tests/check-linux-mount.sh): real FUSE mount with
   local data, reads, write rejection, and unmounting on Linux.
+- [tests/check_writes.py](../tests/check_writes.py): writable FUSE operations with
+  disposable local files, independently checked against their backing directory.
+  [tests/write_support.py](../tests/write_support.py) owns the private mount
+  lifecycle and shared byte checks; it does not change the desktop launcher.
 
 Automated tests do not access an Apple account. Real account access, navigation
 from Files, and download integrity have been checked manually in the lab.
 [CONTRIBUTING.md](../CONTRIBUTING.md) documents the commands and limits of each check.
+The [write checks guide](WRITE_TESTS.md) covers isolated writable mounts.

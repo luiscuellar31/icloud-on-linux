@@ -95,6 +95,9 @@ run `git diff --check` for whitespace. There is no need to rebuild the container
 or use the real account. Report relevant checks you could not run without
 presenting them as passed.
 
+For writable filesystem experiments, follow [the write checks guide](docs/WRITE_TESTS.md).
+Those checks use private mount points and preserve the normal read-only mount.
+
 ## Commits
 
 Use Conventional Commits in English with an imperative summary. The scope is
