@@ -5,9 +5,9 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from write_support import local_environment, mounted, private_workspace
+from write_support import local_environment, mounted, private_workspace, wait_for
 
 
 class WriteSafetyTests(unittest.TestCase):
@@ -48,6 +48,17 @@ class WriteSafetyTests(unittest.TestCase):
                     with mounted('/unused', workspace, local_environment()):
                         self.fail('An occupied mount point was accepted')
             start.assert_not_called()
+
+    def test_a_pending_read_is_retried_before_accepting_the_condition(self):
+        predicate = Mock(side_effect=[BlockingIOError(), False, True])
+        with patch('write_support.time.sleep'):
+            wait_for(predicate, 'The backend did not become ready')
+        self.assertEqual(predicate.call_count, 3)
+
+    def test_a_persistently_unavailable_backend_cannot_pass_the_check(self):
+        predicate = Mock(side_effect=BlockingIOError())
+        with self.assertRaises(TimeoutError):
+            wait_for(predicate, 'The backend did not become ready', timeout=0)
 
 
 if __name__ == '__main__':

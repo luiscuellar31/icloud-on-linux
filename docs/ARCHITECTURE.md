@@ -84,11 +84,19 @@ Dockerfile and the session script needed by the image to the builder.
 - [tests/check-linux-mount.sh](../tests/check-linux-mount.sh): real FUSE mount with
   local data, reads, write rejection, and unmounting on Linux.
 - [tests/check_writes.py](../tests/check_writes.py): writable FUSE operations with
-  disposable local files, independently checked against their backing directory.
+  disposable local files, or an explicit `--icloud` run in a new owned test folder.
+  Reads verify the backing directory or an independent cloud download.
   [tests/write_support.py](../tests/write_support.py) owns the private mount
   lifecycle and shared byte checks; it does not change the desktop launcher.
+- [tests/cloud_sandbox.py](../tests/cloud_sandbox.py): private encrypted configuration
+  copies, strictly scoped cloud paths, ownership markers, and empty-only cleanup.
+- [tests/test_write_safety.py](../tests/test_write_safety.py) and
+  [tests/test_cloud_safety.py](../tests/test_cloud_safety.py): refusal of inherited
+  credentials in local checks, unsafe mount points, existing cloud folders,
+  paths outside the sandbox, and cleanup without verified ownership.
 
-Automated tests do not access an Apple account. Real account access, navigation
-from Files, and download integrity have been checked manually in the lab.
+Default tests do not access an Apple account. Optional cloud checks require an
+explicit selection and use a newly owned test folder. Real account access,
+navigation from Files, and download integrity have also been checked in the lab.
 [CONTRIBUTING.md](../CONTRIBUTING.md) documents the commands and limits of each check.
 The [write checks guide](WRITE_TESTS.md) covers isolated writable mounts.

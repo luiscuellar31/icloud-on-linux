@@ -53,8 +53,11 @@ def rclone(*arguments, environment, check=True, timeout=60):
 def wait_for(predicate, description, timeout=30):
     deadline = time.monotonic() + timeout
     while True:
-        if predicate():
-            return
+        try:
+            if predicate():
+                return
+        except BlockingIOError:
+            pass
         if time.monotonic() >= deadline:
             raise TimeoutError(description)
         time.sleep(0.1)
