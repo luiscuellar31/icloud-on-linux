@@ -65,6 +65,27 @@ folder. Closing the connected app asks whether to disconnect and close it. An
 existing read-only mount from the terminal lab can be opened or disconnected
 without entering a key.
 
+## Sign in or renew the session
+
+On first use, select **Sign in to iCloud**. To renew, choose **Renew Apple
+session...** in the menu; a connected app disconnects first. Disconnect an older
+terminal mount first.
+
+1. Enter the local key. For a new session, choose a local key and confirm it; it
+   encrypts the saved session and is separate from your Apple password.
+2. Enter your Apple account and password, then select **Sign in**.
+3. Enter the 6-digit code shown on your trusted Apple device. To receive a text
+   message instead, select **Send SMS**, choose a phone if several are listed, and
+   enter the code from that message.
+4. When the dialog confirms the sign-in, close it and connect with your local key.
+
+Renew an expired session with the same steps and the Apple account already saved
+in the app. The current session is kept until the new one can read iCloud Drive,
+so cancelling or a failed attempt changes nothing. A rejected code ends the
+attempt; sign in again to request a new code. Another Apple account is refused
+while a saved session exists. Credentials and codes never appear in process
+arguments or logs.
+
 ## Upload files
 
 The file manager folder stays read-only; uploads go through the app queue.

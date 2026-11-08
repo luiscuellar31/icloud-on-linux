@@ -19,6 +19,7 @@ integration is not implemented yet.
 | [crates/app/src/window.rs](../crates/app/src/window.rs) and [view.rs](../crates/app/src/view.rs) | Present the connection status, masked key entry, file manager opening, and safe close; `view.rs` decides what to show and is tested without a display. |
 | [crates/app/src/uploads.rs](../crates/app/src/uploads.rs) | Show the upload queue: the cloud folder for new files, the file dialog, each row's state and progress, and Resume, Pause, Skip, and Keep both. |
 | [scripts/install_desktop.sh](../scripts/install_desktop.sh) | Build the app with Cargo and install it, its helper, and its desktop entry for the current user. |
+| [crates/core/src/auth.rs](../crates/core/src/auth.rs) and [crates/app/src/signin.rs](../crates/app/src/signin.rs) | Run the sign-in steps on a private profile copy, answer setup questions, check access, and publish the profile; the dialog collects the key, Apple account, password, and verification answers. |
 | [crates/core/src/session.rs](../crates/core/src/session.rs) | Unlock the saved profile with the local key, mount iCloud Drive read-only through rclone, and disconnect only the app's own mount. |
 | [crates/core/src/uploads.rs](../crates/core/src/uploads.rs) | Own private upload snapshots, durable queue storage, path validation, and local cleanup. |
 | [crates/core/src/transfers.rs](../crates/core/src/transfers.rs) | Prepare files in a worker thread, run one rclone command at a time, verify cloud bytes, and pause or resolve conflicts. |
@@ -65,6 +66,44 @@ replaced mount is preserved, and only the client the session started is ended. A
 existing compatible mount from the terminal lab can be opened and disconnected.
 Child processes report through threads and a channel; the window calls the
 session's `tick` every 200 ms to collect results and compare the kernel's mounts.
+
+### Native sign-in
+
+**Sign in to iCloud** starts on first use, and **Renew Apple session...** in the menu
+renews later; renewing while connected disconnects first. Sign-in runs while the
+app has no mount or client. It works on a private `.signin-*` copy next to the
+profile and never edits the saved profile in place:
+
+1. A new profile is encrypted with the local key before any answer is saved.
+   For an existing profile, `auth-inspect` returns only the remote's type, service,
+   and account; its password and tokens stay inside rclone. An existing `icloud`
+   remote must be iCloud Drive for the same Apple account, compared without letter
+   case. A profile without that remote can receive one.
+2. `auth-create` recreates the remote in the copy. The app answers the service,
+   account, password, and advanced-options questions; the user answers 2FA with a
+   code, an SMS request, and a trusted phone choice when Apple offers several.
+3. rclone saves continued answers verbatim, while the backend reads its password
+   obscured. `auth-password` therefore pipes the password through `rclone obscure -`
+   inside `scripts/session.sh` before saving it in the encrypted copy.
+4. After the final answer, `auth-probe` checks read access with `lsjson --stat`.
+   Only then does the app publish the copy: it checks that the saved profile is
+   unchanged, links identities, and atomically replaces or creates the profile.
+
+Each step is a separate process that Linux ends if the app dies. The local key,
+rclone state, and answer travel only in its `RCLONE_CONFIG_PASS`, `RCLONE_STATE`,
+and `RCLONE_RESULT` environment variables, never in arguments. The app overwrites
+its own copies of the key, password, and step output when the attempt ends; copies
+that GTK text fields and the standard library make for a child's environment cannot
+be overwritten. Standard error is discarded. A failure, cancellation, or 120-second
+step timeout keeps the saved profile and removes the copy, and the next sign-in
+removes copies that a crash left behind for more than an hour. Quitting or ending
+the desktop session cancels a running step first. A rejected code ends the attempt;
+signing in again requests a new code.
+
+Renewal changes the profile bytes. Before replacing them, the app writes
+`profile-links.json`, which maps the new and old profile hashes to the identity of
+the original profile. Either profile therefore keeps that identity after a crash,
+so work bound to the account keeps its owner. A different account is refused.
 
 ## Managed uploads
 
@@ -162,6 +201,8 @@ with iCloud as the source and a local destination.
 | --- | --- | --- |
 | Docker | `icloud-linux-state` volume, mounted at `/state` | Encrypted `rclone.conf` and files under `downloads/`. They persist after the container closes. |
 | Ubuntu | `~/.config/icloud-linux/rclone.conf` | Dedicated encrypted configuration with `0600` permissions, reused between sessions. |
+| Linux desktop | `~/.config/icloud-linux/profile-links.json` | `0600` map from renewed profile hashes to the identity of the original profile. It contains hashes only. |
+| Linux desktop | `~/.config/icloud-linux/.signin-*/` | Private encrypted profile copy during sign-in, removed when the attempt ends. An abrupt exit can leave it behind; it is never used again. |
 | Ubuntu | `~/iCloud` | Mount point, not a complete offline copy. |
 | Ubuntu | rclone VFS cache, under the user cache directory | Contents of opened files; configuration encryption does not encrypt these copies. |
 | Linux desktop | `~/.cache/icloud-on-linux/vfs/`, or the equivalent under `XDG_CACHE_HOME` | The native app's VFS cache, with the same contents and limits. |
@@ -189,6 +230,11 @@ Dockerfile and the session script needed by the image to the builder.
   disconnects during an upload and resumes it after reconnecting, and ends the app
   during an upload. Then, in a new window, it connects, opens the file manager,
   and disconnects.
+- [crates/core/tests/auth.rs](../crates/core/tests/auth.rs): native sign-in, 2FA,
+  SMS, renewal identity, cancellation, and save failures through a local rclone
+  stand-in. [crates/core/tests/sign_in.rs](../crates/core/tests/sign_in.rs) runs
+  the real rclone setup questions with fictional answers up to the step that would
+  contact Apple.
 - [tests/test_launchers.py](../tests/test_launchers.py): Docker launch, session
   creation and reuse, errors, and key handling through local stand-ins.
 - [tests/test_vm_launcher.py](../tests/test_vm_launcher.py): VM identifier validation

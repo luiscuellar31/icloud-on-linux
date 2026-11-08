@@ -99,6 +99,13 @@ cargo test --package icloud-on-linux --test visible -- --expect-file-manager nau
 
 Use `dolphin` on KDE.
 
+For native sign-in changes, run the tests on Linux. `crates/core/tests/sign_in.rs`
+answers the real rclone iCloud setup questions with fictional values in private
+profiles. It checks that the password is saved obscured inside the encrypted
+copy, that renewal reads the saved account and refuses another one, and that the
+copy is removed. It stops before the answer that would contact Apple; a real
+sign-in requires the maintainer's account.
+
 For container or shared session changes, build the image:
 
 ```sh

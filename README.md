@@ -18,7 +18,8 @@ using rclone to reach your account.
 - Browse iCloud Drive in GNOME Files and open files with your usual apps.
 - Download files when you open them and keep a local cache.
 - Reuse your saved session, encrypted with a separate local key.
-- Connect and disconnect from a native desktop window.
+- Connect and disconnect from a native desktop window, and sign in or renew the
+  session there without a terminal.
 - Upload files with a visible queue, pause and resume, and conflict decisions.
 - List and download files from a terminal through the Docker environment.
 
@@ -56,7 +57,6 @@ the [Docker guide](docs/DOCKER.md) for the commands and download steps.
 
 - Upload, edit, move, and delete files from the file manager.
 - Keep folders in sync and handle conflicts and interrupted connections.
-- Bring account setup into the native app.
 - Package and test the app for Ubuntu, Fedora, and Debian with GNOME and KDE.
 
 ## Documentation and contributions
