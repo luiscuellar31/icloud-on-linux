@@ -64,7 +64,7 @@ def wait_for(predicate, description, timeout=30):
 
 
 @contextlib.contextmanager
-def mounted(source, workspace, environment):
+def mounted(source, workspace, environment, flags=()):
     mountpoint = workspace / 'mount'
     mountpoint.mkdir(exist_ok=True)
     if os.path.ismount(mountpoint) or any(mountpoint.iterdir()):
@@ -75,6 +75,7 @@ def mounted(source, workspace, environment):
             '--vfs-cache-mode', 'writes', '--vfs-write-back', '0s',
             '--cache-dir', str(workspace / 'cache'), '--dir-cache-time', '1s',
             '--poll-interval', '0', '--attr-timeout', '0s',
+            *flags,
         ], env=environment, stdout=log, stderr=log)
         try:
             def ready():

@@ -56,3 +56,56 @@ empty data folder, then remove the marker and empty directories. There is no
 recursive remote delete or purge. Failed runs retain the test folder for review;
 unexpected files or a changed ownership marker prevent cleanup. Review any
 retained folder in iCloud before removing it manually.
+
+## Integrity and reconnection
+
+Run the local fault check as a non-root Linux user:
+
+```sh
+python3 tests/check_recovery.py
+```
+
+It starts a WebDAV server bound only to `127.0.0.1`, serving a private folder
+of fictional files. It verifies an online upload and detects an intentional
+same-size corruption using SHA-256. It then stops only that server, observes
+the failed connection, and checks that a closed file remains in the write cache.
+
+The private mount is stopped while offline and restarted with the same cache
+after the server returns. The check requires correct bytes in both the backing
+directory and the mounted file, and verifies that the earlier file is unchanged.
+The normal iCloud connection and VM network services are not interrupted.
+
+This check uses a one-second write-back delay to exercise queued uploads. A zero
+delay uses close-time uploads instead. Directory metadata uses a short cache
+lifetime so entries discovered during an upload can be refreshed before the
+recovery is declared complete. Backend visibility alone is insufficient evidence
+that a mounted file is ready to read.
+
+Fault injection targets local WebDAV. Apple session expiry and recovery during
+an actual iCloud outage still require separate validation.
+
+## Conflicting iCloud edits
+
+Opt in to a new, exclusive iCloud folder:
+
+```sh
+python3 tests/check_recovery.py --icloud
+```
+
+The check uploads an original fixture and replaces it with a different version
+to represent another editor. It then attempts to upload the stale original with
+directory `copy --immutable --ignore-times`. A private upload directory contains
+only the fixture; configuration files are kept outside it. The expected conflict
+error must occur, and an independent
+download must still match the competing version. Only that fixture and its
+verified empty test folder are removed afterwards.
+
+The check first proves the directory-copy guard locally, including its anchored
+file filter. Rclone 1.75.2 routes single-file `copy` and `copyto` through a different
+path that does not apply the immutable overwrite check. The test deliberately
+uses directory copy and forces the stale transfer comparison rather than trusting
+size and modification time to indicate an attempted write.
+
+This verifies the explicit immutable transfer guard. A sync client still needs
+its own conflict detection and resolution before general writes are enabled.
+The normal desktop mount stays read-only.

@@ -11,7 +11,7 @@ import uuid
 from write_support import local_environment, rclone
 
 
-FILES = {'draft space.bin', 'renamed.bin', 'nested folder/unicode-\u03bb.txt'}
+FILES = {'draft space.bin', 'renamed.bin', 'nested folder/unicode-\u03bb.txt', 'conflict.bin'}
 
 
 def checked_root(root):
@@ -73,9 +73,11 @@ class CloudSandbox:
         self.created = True
         if self.run('lsf', self.path()).stdout.strip():
             raise RuntimeError('The new test folder is not empty')
-        marker = self.workspace / 'owner.json'
+        marker_source = self.workspace / 'marker-source'
+        marker_source.mkdir()
+        marker = marker_source / 'owner.json'
         marker.write_bytes(self.marker)
-        self.run('copyto', marker, self.path('owner.json'), '--immutable')
+        self.run('copy', marker_source, self.path(), '--immutable')
         if self.run('cat', self.path('owner.json')).stdout != self.marker:
             raise RuntimeError('The sandbox ownership marker could not be verified')
         self.run('mkdir', self.path('data'))

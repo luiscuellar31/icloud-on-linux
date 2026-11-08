@@ -94,6 +94,11 @@ Dockerfile and the session script needed by the image to the builder.
   [tests/test_cloud_safety.py](../tests/test_cloud_safety.py): refusal of inherited
   credentials in local checks, unsafe mount points, existing cloud folders,
   paths outside the sandbox, and cleanup without verified ownership.
+- [tests/check_recovery.py](../tests/check_recovery.py): a loopback-only WebDAV
+  fixture for corruption detection, interrupted uploads, persistent write cache,
+  and private mount restarts. An explicit `--icloud` run checks immutable conflict
+  rejection in another owned cloud test folder. Production launchers and their
+  read-only policy are unchanged.
 
 Default tests do not access an Apple account. Optional cloud checks require an
 explicit selection and use a newly owned test folder. Real account access,

@@ -51,6 +51,23 @@ class CloudSafetyTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], 'lsjson')
         self.assertFalse(self.sandbox.created)
 
+    def test_marker_upload_directory_never_contains_the_account_configuration(self):
+        (Path(self.temporary.name) / 'rclone.conf').write_bytes(b'private fixture configuration')
+        replies = [
+            subprocess.CompletedProcess([], 3, b''),
+            subprocess.CompletedProcess([], 0, b''),
+            subprocess.CompletedProcess([], 0, b''),
+            subprocess.CompletedProcess([], 0, b''),
+            subprocess.CompletedProcess([], 0, self.sandbox.marker),
+            subprocess.CompletedProcess([], 0, b''),
+        ]
+        with patch('cloud_sandbox.rclone', side_effect=replies) as run:
+            self.sandbox.create()
+        upload = next(call for call in run.call_args_list if call.args[0] == 'copy')
+        source = upload.args[1]
+        self.assertEqual({path.name for path in source.iterdir()}, {'owner.json'})
+        self.assertEqual((source / 'owner.json').read_bytes(), self.sandbox.marker)
+
     def test_unverified_ownership_prevents_all_cleanup_mutations(self):
         with patch('cloud_sandbox.rclone', return_value=subprocess.CompletedProcess([], 0, b'foreign marker')) as run:
             with self.assertRaisesRegex(RuntimeError, 'Ownership changed'):

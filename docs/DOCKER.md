@@ -111,13 +111,19 @@ rclone lsf 'icloud:Documents'
 Choose a small existing file and adapt the example path:
 
 ```sh
-rclone copyto 'icloud:Documents/sample.pdf' /state/downloads/sample.pdf --immutable --progress
+rclone copy 'icloud:Documents' /state/downloads --include '/sample.pdf' --max-depth 1 --immutable --progress
 sha256sum /state/downloads/sample.pdf
 ```
 
-The source is iCloud and the destination is local to the container. `--immutable`
-prevents overwriting an existing download with different content. Compare its
-hash with a reference copy of the same file to verify its contents.
+The source is the iCloud folder; the anchored filter selects only `sample.pdf`
+at its top level. The destination is local to the container. This directory-copy
+path applies `--immutable` to protect an existing download with different content.
+Compare its hash with a reference copy of the same file to verify its contents.
+
+Keep the source as a folder. In rclone 1.75.2, single-file `copy` and `copyto` use
+a separate path that does not enforce the immutable overwrite check. See the
+[command dispatch](https://github.com/rclone/rclone/blob/v1.75.2/cmd/copy/copy.go)
+and [directory-copy guard](https://github.com/rclone/rclone/blob/v1.75.2/fs/sync/sync.go).
 
 To copy it to the host, open another terminal at the repository root while the
 container is still open:
