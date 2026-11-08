@@ -186,6 +186,8 @@ struct List<T> {
 
 /// Local entries by path relative to the folder.
 type Snapshot = BTreeMap<OsString, Entry>;
+/// Receives the folder, exit code, and error output of a finished run.
+type Observer = Rc<dyn Fn(&str, i32, &str)>;
 
 /// What a scan compares: folders by presence only, other entries also by size and modification time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,6 +229,7 @@ pub struct SyncedFolders {
     // Signals wait in these flags until `notify`, so no slot runs while a borrow is held.
     dirty: Cell<bool>,
     idle_due: Cell<bool>,
+    observer: RefCell<Option<Observer>>,
 }
 
 impl SyncedFolders {
@@ -255,6 +258,7 @@ impl SyncedFolders {
             scan_interval: Cell::new(SCAN),
             dirty: Cell::new(false),
             idle_due: Cell::new(false),
+            observer: RefCell::new(None),
         });
         let weak = Rc::downgrade(&sync);
         sync.connection.changed().connect(move || {
@@ -393,6 +397,12 @@ impl SyncedFolders {
     pub fn pause(&self) {
         self.interrupt();
         self.notify();
+    }
+
+    /// Call `observer` with the folder, exit code, and error output of every run that ends while not paused, before
+    /// its result is applied, as checks need to read rclone's messages. A later call replaces the observer.
+    pub fn observe_runs(&self, observer: impl Fn(&str, i32, &str) + 'static) {
+        *self.observer.borrow_mut() = Some(Rc::new(observer));
     }
 
     /// Collect the running bisync, kill it 30 seconds after an interruption, or start the first due folder.
@@ -634,7 +644,12 @@ impl SyncedFolders {
             job.commands.remove(0);
             self.start(job);
         } else {
-            self.finished(&job.identifier, code, &String::from_utf8_lossy(log), &job.backups);
+            let log = String::from_utf8_lossy(log);
+            let observer = self.observer.borrow().clone();
+            if let Some(observer) = observer {
+                observer(&job.identifier, code, &log);
+            }
+            self.finished(&job.identifier, code, &log, &job.backups);
         }
     }
 
@@ -1428,6 +1443,28 @@ mod tests {
         case.connection.unlocked.set(true);
         case.connection.changed.emit();
         assert!(case.sync.folders.borrow()[0].manual);
+    }
+
+    #[test]
+    fn observers_read_the_exit_code_and_messages_of_each_run() {
+        let case = Case::new();
+        *case.connection.script.borrow_mut() = Some("echo 'ERROR : fixture message' >&2; exit 3".to_owned());
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let record = seen.clone();
+        case.sync.observe_runs(move |identifier, code, log| {
+            record.borrow_mut().push((identifier.to_owned(), code, log.to_owned()))
+        });
+        let identifier = case.add("Documents");
+        case.sync.tick();
+        wait(|| {
+            case.sync.tick();
+            !case.sync.busy()
+        });
+        assert_eq!(
+            *seen.borrow(),
+            [(identifier.clone(), 3, "ERROR : fixture message\n".to_owned())]
+        );
+        assert_eq!(case.folder(&identifier).state, State::Error);
     }
 
     #[test]

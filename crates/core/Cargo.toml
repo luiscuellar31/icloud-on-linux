@@ -17,6 +17,13 @@ tempfile.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+# Reading the local key with echo off, in the real-account check.
+nix = { workspace = true, features = ["term"] }
 # Read the `tr!` texts from the sources to check the translations.
 proc-macro2 = "1"
 syn = "3"
+
+# The real-account check parses its own options, so it has its own main function.
+[[test]]
+name = "icloud_sync"
+harness = false
