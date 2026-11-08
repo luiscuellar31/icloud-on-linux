@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use gtk::glib;
 use icloud_core::session::State;
 use icloud_core::sync::{Review, State as FolderState, SyncFolder};
 use icloud_core::tr;
@@ -105,6 +106,10 @@ pub struct Facts {
     pub folders: Folders,
     /// The window waits for uploads and sync to stop before disconnecting.
     pub disconnect_pending: bool,
+    /// The upload queue holds rows.
+    pub queued: bool,
+    /// Signing out waits for uploads, sync, and the connection to stop.
+    pub signing_out: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -122,12 +127,16 @@ pub struct Screen {
     pub cancel_enabled: bool,
     pub disconnect: bool,
     pub renew: bool,
+    pub sign_out: bool,
+    pub change_account: bool,
 }
 
 pub fn screen(facts: &Facts) -> Screen {
     let busy = matches!(facts.state, State::Connecting | State::Disconnecting);
     let available = facts.state == State::Available;
     let can_connect = !busy && !facts.mounted && !facts.client;
+    // Account changes wait while the app connects, disconnects, or signs out.
+    let idle = !busy && !facts.disconnect_pending && !facts.signing_out;
     let connected = |summary: String| format!("{} · {summary}", tr!("Connected"));
     let (status, tone) = match facts.state {
         State::Available if facts.folders == Folders::Review || facts.uploads == Uploads::Review => {
@@ -168,7 +177,58 @@ pub fn screen(facts: &Facts) -> Screen {
             && facts.state != State::Disconnecting
             && (facts.mounted || facts.checking || facts.client),
         renew: facts.signed_in && !facts.renewing && (can_connect || available),
+        // Signing out also removes uploads and synced folders that remain after the session was deleted.
+        sign_out: (facts.signed_in || facts.folders != Folders::None || facts.queued) && idle,
+        change_account: facts.signed_in && idle,
     }
+}
+
+/// What signing out removes from this computer.
+pub struct AccountData {
+    /// Automatic unlock keeps the local key in the desktop keyring.
+    pub key_saved: bool,
+    pub pending_uploads: usize,
+    pub folders: usize,
+    /// Bytes of cached contents of opened files.
+    pub cache: u64,
+}
+
+/// The sign-out confirmation: what goes away from this computer, and, to change the account, why.
+pub fn sign_out_text(data: &AccountData, change: bool) -> String {
+    let mut removed = vec![if data.key_saved {
+        tr!("The saved session and the key saved in the desktop keyring")
+    } else {
+        tr!("The saved session")
+    }];
+    if data.pending_uploads > 0 {
+        removed.push(tr!(
+            "{count} pending upload(s) not yet in iCloud; the files on this computer stay",
+            count = data.pending_uploads
+        ));
+    }
+    if data.folders > 0 {
+        removed.push(tr!(
+            "Syncing of {count} folder(s), with their Backups",
+            count = data.folders
+        ));
+    }
+    if data.cache > 0 {
+        removed.push(tr!(
+            "Cached contents of opened files ({size})",
+            size = glib::format_size(data.cache)
+        ));
+    }
+    let mut lines = Vec::new();
+    if change {
+        lines.extend([
+            tr!("To use another Apple account, sign out of this one first."),
+            String::new(),
+        ]);
+    }
+    lines.push(tr!("This removes from this computer:"));
+    lines.extend(removed.iter().map(|line| format!("\u{2022} {line}")));
+    lines.extend([String::new(), tr!("Nothing is removed from iCloud.")]);
+    lines.join("\n")
 }
 
 /// Apple sessions last about 30 days; the window warns in the last 5.
@@ -498,6 +558,78 @@ mod tests {
         assert_eq!(upload_status(&items[..1], false, true), Uploads::Problem);
         assert_eq!(upload_status(&[], true, false), Uploads::Problem);
         assert_eq!(upload_status(&[], false, true), Uploads::Busy);
+    }
+
+    #[test]
+    fn signing_out_needs_account_data_and_a_quiet_app() {
+        let idle = facts(State::Disconnected);
+        assert!(screen(&idle).sign_out && screen(&idle).change_account);
+        // Uploads or folders left without a saved session can still be removed, but no account can be changed.
+        let leftovers = Facts {
+            signed_in: false,
+            queued: true,
+            ..facts(State::Disconnected)
+        };
+        assert!(screen(&leftovers).sign_out && !screen(&leftovers).change_account);
+        let nothing = Facts {
+            signed_in: false,
+            ..facts(State::Disconnected)
+        };
+        assert!(!screen(&nothing).sign_out);
+        let connected = Facts {
+            folders: Folders::UpToDate,
+            ..facts(State::Available)
+        };
+        assert!(screen(&connected).sign_out && screen(&connected).change_account);
+        for busy in [
+            facts(State::Connecting),
+            facts(State::Disconnecting),
+            Facts {
+                disconnect_pending: true,
+                ..facts(State::Available)
+            },
+            Facts {
+                signing_out: true,
+                ..facts(State::Available)
+            },
+        ] {
+            let result = screen(&busy);
+            assert!(!result.sign_out && !result.change_account, "{busy:?}");
+        }
+    }
+
+    #[test]
+    fn the_sign_out_confirmation_lists_what_goes_away() {
+        let data = AccountData {
+            key_saved: true,
+            pending_uploads: 2,
+            folders: 1,
+            cache: 2048,
+        };
+        let text = sign_out_text(&data, true);
+        assert!(text.starts_with("To use another Apple account, sign out of this one first.\n\n"));
+        for line in [
+            "\u{2022} The saved session and the key saved in the desktop keyring",
+            "\u{2022} 2 pending upload(s) not yet in iCloud; the files on this computer stay",
+            "\u{2022} Syncing of 1 folder(s), with their Backups",
+            "\u{2022} Cached contents of opened files (",
+        ] {
+            assert!(text.contains(line), "{line} is missing from {text}");
+        }
+        assert!(text.ends_with("\n\nNothing is removed from iCloud."));
+        let plain = sign_out_text(
+            &AccountData {
+                key_saved: false,
+                pending_uploads: 0,
+                folders: 0,
+                cache: 0,
+            },
+            false,
+        );
+        assert_eq!(
+            plain,
+            "This removes from this computer:\n\u{2022} The saved session\n\nNothing is removed from iCloud."
+        );
     }
 
     #[test]

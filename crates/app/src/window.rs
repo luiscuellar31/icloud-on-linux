@@ -2,6 +2,7 @@
 //! and uploads. It shows the app's parts, which keep running when a window in another language replaces it, and while
 //! the window is closed to the tray.
 use std::cell::RefCell;
+use std::fs;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -9,13 +10,14 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 use icloud_core::connection::Connection;
 use icloud_core::session::{Session, State};
-use icloud_core::{i18n, settings, tr};
+use icloud_core::uploads::State as UploadState;
+use icloud_core::{i18n, profile, settings, tr};
 
-use crate::app::{App, Parts};
+use crate::app::{App, Parts, SignOut};
 use crate::folders::Folders;
 use crate::signin::SignIn;
 use crate::uploads::Uploads;
-use crate::view::{self, Facts, Tone};
+use crate::view::{self, AccountData, Facts, Tone};
 
 const TONES: [Tone; 5] = [Tone::Ok, Tone::Busy, Tone::Warning, Tone::Error, Tone::Off];
 
@@ -40,6 +42,8 @@ pub struct Window {
     open: gtk::Button,
     cancel: gtk::Button,
     renew: gio::SimpleAction,
+    change_account: gio::SimpleAction,
+    sign_out: gio::SimpleAction,
     login: gio::SimpleAction,
     unlock: gio::SimpleAction,
     language: gio::SimpleAction,
@@ -178,6 +182,8 @@ impl Window {
             actions.append(Some(&tr!("Upload files...")), Some("win.upload"));
         }
         actions.append(Some(&tr!("Renew Apple session...")), Some("win.renew"));
+        actions.append(Some(&tr!("Change Apple account...")), Some("win.change-account"));
+        actions.append(Some(&tr!("Sign out of this computer...")), Some("win.sign-out"));
         menu.append_section(None, &actions);
         // Each language is shown by its own name, so it can be found in any language.
         let languages = gio::Menu::new();
@@ -222,7 +228,11 @@ impl Window {
             .content(&toolbar)
             .build();
         let renew = gio::SimpleAction::new("renew", None);
-        window.add_action(&renew);
+        let change_account = gio::SimpleAction::new("change-account", None);
+        let sign_out = gio::SimpleAction::new("sign-out", None);
+        for action in [&renew, &change_account, &sign_out] {
+            window.add_action(action);
+        }
         // The menu items and the check box show and change these on and off states.
         let login = gio::SimpleAction::new_stateful("login", None, &false.to_variant());
         let unlock = gio::SimpleAction::new_stateful("unlock", None, &false.to_variant());
@@ -260,6 +270,8 @@ impl Window {
             open,
             cancel,
             renew,
+            change_account,
+            sign_out,
             login,
             unlock,
             language,
@@ -289,6 +301,12 @@ impl Window {
         let weak = Rc::downgrade(self);
         self.renew
             .connect_activate(move |_, _| with(&weak, |window| window.renew()));
+        let weak = Rc::downgrade(self);
+        self.change_account
+            .connect_activate(move |_, _| with(&weak, |window| window.confirm_sign_out(true)));
+        let weak = Rc::downgrade(self);
+        self.sign_out
+            .connect_activate(move |_, _| with(&weak, |window| window.confirm_sign_out(false)));
         let weak = Rc::downgrade(self);
         self.login.connect_change_state(move |_, state| {
             let enabled = state.and_then(|state| state.get::<bool>());
@@ -362,6 +380,11 @@ impl Window {
             uploads: self.uploads.status(),
             folders: self.folders.status(),
             disconnect_pending: parts.disconnect_pending.get(),
+            queued: parts
+                .transfers
+                .as_ref()
+                .is_some_and(|transfers| !transfers.items().is_empty()),
+            signing_out: parts.sign_out.get().is_some(),
         };
         let screen = view::screen(&facts);
         self.status.set_label(&screen.status);
@@ -383,6 +406,8 @@ impl Window {
         let review = self.folders.render(screen.open_visible, facts.signed_in);
         let decision = self.uploads.render();
         self.renew.set_enabled(screen.renew);
+        self.change_account.set_enabled(screen.change_account);
+        self.sign_out.set_enabled(screen.sign_out);
         // A window that is closing is not replaced.
         self.language.set_enabled(!parts.closing.get());
         let expiry = facts
@@ -404,6 +429,24 @@ impl Window {
             } else if screen.key_panel || screen.welcome {
                 parts.renew_pending.set(false);
                 self.sign_in();
+            }
+        }
+        if let Some(sign_out) = parts.sign_out.get() {
+            let stopped = !self.session.busy()
+                && mount.is_none()
+                && !facts.client
+                && !parts.busy()
+                && !parts.disconnect_pending.get();
+            if stopped {
+                parts.sign_out.set(None);
+                // Removing the data changes the parts, which render again, so it waits for this render to end.
+                with(&self.app, |app| {
+                    let weak = Rc::downgrade(app);
+                    glib::idle_add_local_once(move || with(&weak, |app| app.window().forget(sign_out)));
+                });
+            } else if facts.state == State::Error && !parts.disconnect_pending.get() {
+                // Disconnecting failed; the status explains why, and nothing was removed.
+                parts.sign_out.set(None);
             }
         }
         if parts.closing.get() && !self.session.busy() && !parts.disconnect_pending.get() && !self.signing_in() {
@@ -513,6 +556,136 @@ impl Window {
                     window.disconnect_session();
                     window.render();
                 });
+            }
+        });
+    }
+
+    /// Ask before signing out of this computer, listing what goes away; with `change`, sign-in opens afterwards for
+    /// another Apple account.
+    fn confirm_sign_out(self: &Rc<Self>, change: bool) {
+        let parts = &self.parts;
+        let folders = parts.sync.as_ref().map(|sync| sync.folders()).unwrap_or_default();
+        let pending_uploads = parts.transfers.as_ref().map_or(0, |transfers| {
+            let done = [UploadState::Completed, UploadState::Skipped];
+            transfers
+                .items()
+                .iter()
+                .filter(|item| !done.contains(&item.state))
+                .count()
+        });
+        let data = AccountData {
+            key_saved: parts.unlocks_automatically(),
+            pending_uploads,
+            folders: folders.len(),
+            cache: profile::folder_size(&self.session.paths().cache.join("vfs")),
+        };
+        let (heading, accept) = if change {
+            (tr!("Change Apple account"), tr!("Sign out and continue"))
+        } else {
+            (tr!("Sign out of this computer"), tr!("Sign out"))
+        };
+        let dialog = adw::AlertDialog::builder()
+            .heading(heading)
+            .body(view::sign_out_text(&data, change))
+            .close_response("cancel")
+            .default_response("cancel")
+            .build();
+        dialog.add_responses(&[("cancel", &tr!("Cancel")), ("sign-out", &accept)]);
+        dialog.set_response_appearance("sign-out", adw::ResponseAppearance::Destructive);
+        let trash = (!folders.is_empty()).then(|| {
+            let size = folders.iter().map(|folder| profile::folder_size(&folder.local)).sum();
+            gtk::CheckButton::with_label(&tr!(
+                "Also move the local copies in iCloud Sync to the Trash ({size})",
+                size = glib::format_size(size)
+            ))
+        });
+        dialog.set_extra_child(trash.as_ref());
+        let weak = Rc::downgrade(self);
+        dialog.choose(Some(&self.window), gio::Cancellable::NONE, move |response| {
+            if response != "sign-out" {
+                return;
+            }
+            with(&weak, |window| {
+                let trash = trash.as_ref().is_some_and(|check| check.is_active());
+                window.parts.sign_out.set(Some(SignOut { trash, change }));
+                // `render` removes the data once uploads, sync, and the connection have stopped.
+                let session = &window.session;
+                if window.active() || session.current_mount().is_some() || session.reconnecting() {
+                    window.disconnect_session();
+                }
+                window.render();
+            })
+        });
+    }
+
+    /// Remove this computer's account data, now that uploads, sync, and the connection have stopped. Nothing is
+    /// removed from iCloud.
+    pub(crate) fn forget(self: &Rc<Self>, sign_out: SignOut) {
+        let parts = &self.parts;
+        let paths = self.session.paths();
+        let mut problems = Vec::new();
+        if sign_out.trash
+            && let Some(sync) = &parts.sync
+        {
+            let trash = parts.trash.borrow();
+            for folder in sync.folders() {
+                // The Trash keeps local changes that had not synced yet recoverable.
+                let copy = fs::symlink_metadata(&folder.local).is_ok_and(|info| info.is_dir());
+                if copy && !trash(&folder.local) {
+                    problems.push(tr!("local copies"));
+                }
+            }
+        }
+        if profile::forget(paths).is_err() {
+            problems.push(tr!("the saved session"));
+        }
+        let uploads = match &parts.transfers {
+            Some(transfers) => transfers.forget().is_ok(),
+            None => profile::delete_path(&paths.cache.join("uploads")).is_ok(),
+        };
+        if !uploads {
+            problems.push(tr!("pending uploads"));
+        }
+        let sync = match &parts.sync {
+            Some(sync) => sync.forget().is_ok(),
+            None => profile::delete_path(&paths.cache.join("sync")).is_ok(),
+        };
+        if !sync {
+            problems.push(tr!("sync state"));
+        }
+        with(&self.app, |app| app.clear_key());
+        let _ = parts.settings.forget_account();
+        if sign_out.trash
+            && let Some(sync) = &parts.sync
+            && fs::remove_dir(sync.local_root()).is_ok()
+        {
+            // Other files left in iCloud Sync would keep the folder and its sidebar place.
+            let _ = parts.places.borrow().remove(sync.local_root());
+        }
+        parts.told.expiry.set(false);
+        self.session.set_status(
+            State::Disconnected,
+            tr!("Signed out of this computer. Nothing was removed from iCloud."),
+        );
+        problems.dedup();
+        if problems.is_empty() {
+            if sign_out.change {
+                self.sign_in();
+            }
+            return;
+        }
+        let dialog = adw::AlertDialog::builder()
+            .heading(tr!("Sign out of this computer"))
+            .body(tr!(
+                "Some data could not be removed: {items}. Check the permissions of your home folder and try again.",
+                items = problems.join(", ")
+            ))
+            .build();
+        dialog.add_responses(&[("close", &tr!("Close"))]);
+        let weak = Rc::downgrade(self);
+        dialog.choose(Some(&self.window), gio::Cancellable::NONE, move |_| {
+            if sign_out.change {
+                with(&weak, |window| window.sign_in());
             }
         });
     }

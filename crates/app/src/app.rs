@@ -3,6 +3,7 @@
 //! parts running; closing the window can leave them running in the tray.
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
+use std::path::Path;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
@@ -40,6 +41,8 @@ pub struct Parts {
     pub autostart: RefCell<Autostart>,
     /// Where Add folder puts the iCloud Sync place.
     pub places: RefCell<Places>,
+    /// Move a local copy to the Trash, so changes that had not synced stay recoverable.
+    pub trash: RefCell<Trash>,
     /// Disconnect waits for uploads and sync to stop, because they use the unlocked connection.
     pub disconnect_pending: Cell<bool>,
     /// The app closes once uploads, sync, and the connection have stopped.
@@ -48,7 +51,21 @@ pub struct Parts {
     pub renew_pending: Cell<bool>,
     /// Save the key in the keyring once the key the user typed unlocks the connection.
     pub remember_key: Cell<bool>,
+    /// Account data is removed once uploads, sync, and the connection have stopped.
+    pub sign_out: Cell<Option<SignOut>>,
     pub told: Told,
+}
+
+/// Move a file or folder to the Trash; whether it moved.
+pub type Trash = Box<dyn Fn(&Path) -> bool>;
+
+/// A confirmed sign-out from this computer.
+#[derive(Clone, Copy, Debug)]
+pub struct SignOut {
+    /// Move the local copies of synced folders to the Trash.
+    pub trash: bool,
+    /// Sign in with another Apple account afterwards.
+    pub change: bool,
 }
 
 /// What the app has already shown or told the user, so each new problem stands out once.
@@ -92,10 +109,14 @@ impl Parts {
             keyring: RefCell::new(keyring.available().then_some(keyring)),
             autostart: RefCell::new(Autostart::for_user()),
             places: RefCell::new(Places::for_user()),
+            trash: RefCell::new(Box::new(|path: &Path| {
+                gio::File::for_path(path).trash(gio::Cancellable::NONE).is_ok()
+            })),
             disconnect_pending: Cell::new(false),
             closing: Cell::new(false),
             renew_pending: Cell::new(false),
             remember_key: Cell::new(false),
+            sign_out: Cell::new(None),
             told: Told::default(),
         });
         every(Duration::from_millis(200), &parts.session, Session::tick);

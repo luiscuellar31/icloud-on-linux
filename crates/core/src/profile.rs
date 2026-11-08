@@ -129,6 +129,41 @@ pub fn web_access_message() -> String {
     )
 }
 
+/// Bytes stored under `path`, without following links; a missing path holds none.
+pub fn folder_size(path: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| match entry.file_type() {
+            Ok(kind) if kind.is_dir() => folder_size(&entry.path()),
+            _ => entry.metadata().map_or(0, |info| info.len()),
+        })
+        .sum()
+}
+
+/// Delete the saved session, its identity links, interrupted sign-in copies, and cached file contents.
+pub fn forget(paths: &crate::paths::Paths) -> io::Result<()> {
+    let folder = paths.config.parent().unwrap_or(Path::new("."));
+    let mut targets = vec![
+        paths.config.clone(),
+        paths.config.with_file_name("profile-links.json"),
+        paths.cache.join("vfs"),
+    ];
+    match fs::read_dir(folder) {
+        Ok(entries) => targets.extend(
+            entries
+                .flatten()
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with(".signin-"))
+                .map(|entry| entry.path()),
+        ),
+        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+        Err(_) => {}
+    }
+    targets.iter().try_for_each(|target| delete_path(target))
+}
+
 pub fn sha256(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
@@ -228,6 +263,57 @@ pub fn profile_identity(path: &Path, digest: Option<String>) -> Result<String> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn forgetting_deletes_the_session_and_cache_but_never_follows_links() {
+        let root = tempfile::tempdir().unwrap();
+        let config_folder = root.path().join("config");
+        let outside = root.path().join("outside");
+        fs::create_dir_all(config_folder.join(".signin-abc")).unwrap();
+        fs::create_dir_all(root.path().join("cache/vfs/icloud")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("keep.txt"), "kept").unwrap();
+        std::os::unix::fs::symlink(&outside, root.path().join("cache/vfs/icloud/link")).unwrap();
+        for name in [
+            "rclone.conf",
+            "profile-links.json",
+            "settings.ini",
+            ".signin-abc/rclone.conf",
+        ] {
+            fs::write(config_folder.join(name), "fixture").unwrap();
+        }
+        let paths = crate::paths::Paths {
+            config: config_folder.join("rclone.conf"),
+            mount: root.path().join("mount"),
+            cache: root.path().join("cache"),
+            runtime: root.path().join("runtime"),
+            helper: root.path().join("session.sh"),
+        };
+        forget(&paths).unwrap();
+        let left: Vec<_> = fs::read_dir(&config_folder)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name())
+            .collect();
+        assert_eq!(left, ["settings.ini"]);
+        assert!(!root.path().join("cache/vfs").exists());
+        assert_eq!(fs::read_to_string(outside.join("keep.txt")).unwrap(), "kept");
+        forget(&paths).unwrap();
+    }
+
+    #[test]
+    fn folder_sizes_count_files_without_following_links() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("copies");
+        fs::create_dir_all(folder.join("nested")).unwrap();
+        fs::write(folder.join("a.txt"), [0; 100]).unwrap();
+        fs::write(folder.join("nested/b.txt"), [0; 23]).unwrap();
+        fs::write(root.path().join("outside.bin"), [0; 5000]).unwrap();
+        std::os::unix::fs::symlink(root.path(), folder.join("nested/root")).unwrap();
+        let link = fs::symlink_metadata(folder.join("nested/root")).unwrap().len();
+        assert_eq!(folder_size(&folder), 123 + link);
+        assert_eq!(folder_size(&root.path().join("missing")), 0);
+    }
 
     const LINE: &str = "41 29 0:52 / /home/fixture/iCloud rw,nosuid,nodev,relatime shared:1 - fuse.rclone icloud: \
                         ro,user_id=UID,group_id=1000\n";
