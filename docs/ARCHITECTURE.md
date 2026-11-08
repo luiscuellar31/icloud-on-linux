@@ -308,8 +308,10 @@ and libadwaita 1.5.
 
 Packages are built and checked in disposable containers. Builds receive only the
 packaged sources; checks receive tracked files, packages, and test programs.
-Neither receives `.vm/` or `downloads/`. There is no release or signed repository
-yet.
+Neither receives `.vm/` or `downloads/`. The build images are pinned by digest, so a
+replaced tag cannot change a package, and the checks install rclone only after it
+matches a checksum taken from the signed release list. There is no release or
+signed repository yet.
 
 ## Mount and desktop integration
 

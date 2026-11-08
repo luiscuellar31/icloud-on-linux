@@ -15,11 +15,13 @@ if [[ "${1:-}" != --inside ]]; then
     sources() { git ls-files -z --cached --others --exclude-standard; }
     # The test programs are built once, in the image that builds the .deb, and the same programs then run
     # on every distribution. Their paths to the repository are fixed at /source.
+    # The test programs are built in the same image as the .deb.
+    rust_image="$(sed -n 's/^rust_image=//p' packaging/build.sh)"
     rm -rf target/package-checks
     mkdir -p target/package-checks
     sources | COPYFILE_DISABLE=1 tar --null -T - -cf - |
         docker run --interactive --rm --env CARGO_BUILD_JOBS --env CARGO_PROFILE_DEV_DEBUG=false \
-            --env CARGO_PROFILE_DEV_STRIP=debuginfo rust:1.92-slim-trixie bash -euo pipefail -c '
+            --env CARGO_PROFILE_DEV_STRIP=debuginfo "$rust_image" bash -euo pipefail -c '
             mkdir /source && tar --warning=no-unknown-keyword -xf - -C /source
             export DEBIAN_FRONTEND=noninteractive
             apt-get update >/dev/null
@@ -50,11 +52,17 @@ if command -v apt-get >/dev/null; then
     apt-get update >/dev/null
     apt-get install --yes --no-install-recommends curl ca-certificates >/dev/null
     arch="$(dpkg --print-architecture)"
+    # Checksums from the signed SHA256SUMS of rclone 1.75.2, verified with rclone's release key
+    # FBF737ECE9F8AB18604BD2AC93935E02FF3B54FA; a file from the download server alone could be replaced with it.
+    case "$arch" in
+        arm64) checksum=b8ba161d5c837206fad79ff1aabf0a81aa02a5fb164cdbc0ff5db4160aecd278 ;;
+        amd64) checksum=efbfe852181f7191eb3c9043ed1ab49c9b2d0ba045c61c926a5da111c939ec5c ;;
+        *) printf 'No verified rclone package for %s.\n' "$arch" >&2; exit 1 ;;
+    esac
     download="$(mktemp -d)"
     (cd "$download" && curl --fail --silent --show-error --location \
-        --remote-name "https://downloads.rclone.org/v1.75.2/rclone-v1.75.2-linux-$arch.deb" \
-        --remote-name https://downloads.rclone.org/v1.75.2/SHA256SUMS &&
-        sha256sum --check --ignore-missing --quiet SHA256SUMS)
+        --remote-name "https://downloads.rclone.org/v1.75.2/rclone-v1.75.2-linux-$arch.deb" &&
+        printf '%s  %s\n' "$checksum" "rclone-v1.75.2-linux-$arch.deb" | sha256sum --check --quiet)
     # Recommends stay enabled, as on a desktop.
     apt-get install --yes "$download/rclone-v1.75.2-linux-$arch.deb" ./dist/icloud-on-linux_*_"$arch".deb \
         weston desktop-file-utils dbus >/dev/null

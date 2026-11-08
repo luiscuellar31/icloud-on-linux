@@ -253,14 +253,19 @@ sudo apt install --yes fuse3 curl ca-certificates
 icloud_package_dir="$(mktemp -d)"
 cd "$icloud_package_dir"
 curl --fail --location --remote-name https://downloads.rclone.org/v1.75.2/rclone-v1.75.2-linux-arm64.deb
-curl --fail --location --remote-name https://downloads.rclone.org/v1.75.2/SHA256SUMS
-sha256sum --check --ignore-missing SHA256SUMS && sudo apt install --yes ./rclone-v1.75.2-linux-arm64.deb
+echo 'b8ba161d5c837206fad79ff1aabf0a81aa02a5fb164cdbc0ff5db4160aecd278  rclone-v1.75.2-linux-arm64.deb' | sha256sum --check
+sudo apt install --yes ./rclone-v1.75.2-linux-arm64.deb
 rclone version
 ```
 
-Check that the package passes checksum verification and `rclone version` shows
-`v1.75.2` and `arm64`. Choose the package for the target architecture when using
-another Linux machine.
+Install the package only if the checksum line reports `OK`, and check that
+`rclone version` shows `v1.75.2` and `arm64`. On an `amd64` machine, use
+`rclone-v1.75.2-linux-amd64.deb` with the checksum
+`efbfe852181f7191eb3c9043ed1ab49c9b2d0ba045c61c926a5da111c939ec5c`.
+Both checksums come from the release's `SHA256SUMS`, whose signature was verified
+with rclone's [release signing key](https://rclone.org/release_signing/)
+`FBF737ECE9F8AB18604BD2AC93935E02FF3B54FA`; a checksum file downloaded from the same
+server as the package could be replaced together with it.
 
 ## 3. Authorize iCloud in Ubuntu
 

@@ -37,7 +37,9 @@ explicit request from the maintainer; preparing a change does not authorize eith
   typographic quotation marks in prose; preserve quoting required by code syntax.
 - Verify external tool options against the code, installed version, or official
   documentation before changing them. Keep the tested rclone version consistent
-  across Docker, Ubuntu, the packages, and the guides.
+  across Docker, Ubuntu, the packages, and the guides. For a new rclone release,
+  verify its signed `SHA256SUMS` with the release key, then update the recorded
+  package checksums in `tests/check_packages.sh` and the Ubuntu guide.
 - Documentation must have lasting value. Extend an existing document before
   adding another; keep session logs and temporary reports outside the repository.
 - Pass user-visible text to `tr!` from `icloud_core::i18n` as a literal and add
@@ -157,14 +159,17 @@ in the official Rust 1.92 image based on Debian 13; the `.rpm` is built in Fedor
 then defaults to `debian:13 ubuntu:24.04 ubuntu:26.04 fedora:45`; pass other images
 as arguments. Containers receive only tracked sources, the packages, and those
 programs, never `.vm/` or `downloads/`. Each installs the package with rclone
-1.75.2 (the verified official package on Debian and Ubuntu) and runs as an
-unprivileged user with the installed helper: the Rust tests, including a real FUSE
-mount, real bisync for synced folders, and the real rclone sign-in steps; the
-visible window under headless Weston on a private D-Bus session, where Open must
-start a stand-in file manager; and the installed app, which must close on SIGTERM.
-Containers get `/dev/fuse` and `SYS_ADMIN` for the private mounts. Compiling the
-GTK bindings takes up to 2 GB of memory per job; with less, set
-`CARGO_BUILD_JOBS=1` before running both scripts.
+1.75.2 (on Debian and Ubuntu, the official package matched against the checksum
+recorded in the script) and runs as an unprivileged user with the installed
+helper: the Rust tests, including a real FUSE mount, real bisync for synced
+folders, and the real rclone sign-in steps; the visible window under headless
+Weston on a private D-Bus session, where Open must start a stand-in file manager;
+and the installed app, which must close on SIGTERM. Containers get `/dev/fuse`
+and `SYS_ADMIN` for the private mounts. Compiling the GTK bindings takes up to
+2 GB of memory per job; with less, set `CARGO_BUILD_JOBS=1` before running both
+scripts. The Rust and Fedora build images are pinned by digest in
+`packaging/build.sh`; to update one, check the new image and change its tag and
+digest together.
 
 To check the real GNOME and KDE Wayland compositors, run this in the dedicated VM
 as a separate test user that can read the checkout, with `gnome-shell`,
