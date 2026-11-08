@@ -18,8 +18,10 @@ and Fedora 45 containers.
 | [scripts/linux-start.sh](../scripts/linux-start.sh) | Check the Linux environment, select the user configuration, and open or reuse `~/iCloud`. |
 | [open-ubuntu.command](../open-ubuntu.command) | Open only the VirtualBox VM identified by `.vm/uuid`; do not create or provision machines. |
 | [scripts/provision-desktop.sh](../scripts/provision-desktop.sh) | Prepare the dedicated VM desktop and shortcuts using resources from its `cidata` medium. |
-| [crates/app/src/main.rs](../crates/app/src/main.rs) | Start the app for the desktop user; GApplication keeps one running copy and shows its window when opened again. |
-| [crates/app/src/window.rs](../crates/app/src/window.rs) and [view.rs](../crates/app/src/view.rs) | Present the connection status, masked key entry, file manager opening, and safe close; `view.rs` decides what to show and is tested without a display. |
+| [crates/app/src/main.rs](../crates/app/src/main.rs) | Start the app for the desktop user in the saved language; GApplication keeps one running copy, shows its window when opened again, and accepts `--background` from autostart entries. |
+| [crates/app/src/app.rs](../crates/app/src/app.rs) | Own the connection, the upload queue, and synced folders with their timers for as long as the app runs, together with the window that shows them, the tray icon, desktop notifications, and keyring calls. A language change builds a new window over the same parts. |
+| [crates/app/src/window.rs](../crates/app/src/window.rs) and [view.rs](../crates/app/src/view.rs) | Present the status, first-use sign-in, masked key entry, the Apple session warning, file manager opening, the menu, closing to the tray, and quitting; `view.rs` decides what to show and is tested without a display. |
+| [crates/app/src/tray.rs](../crates/app/src/tray.rs) | Export the tray icon as a StatusNotifierItem with a `com.canonical.dbusmenu` menu through GIO's D-Bus API, and register it again whenever a StatusNotifierWatcher appears. |
 | [crates/app/src/folders.rs](../crates/app/src/folders.rs) | Show the synced folders: Add folder, each folder's state, a context menu with Open, Sync now, Backups, and Stop syncing, and Review for folders that stopped. |
 | [crates/app/src/uploads.rs](../crates/app/src/uploads.rs) | Show the upload queue: the cloud folder for new files, the file dialog, each row's state and progress, and Resume, Pause, Skip, and Keep both. |
 | [scripts/install_desktop.sh](../scripts/install_desktop.sh) | Build the app with Cargo and install it, its helper, and its desktop entry for the current user. |
@@ -33,6 +35,10 @@ and Fedora 45 containers.
 | [crates/core/src/transfers.rs](../crates/core/src/transfers.rs) | Prepare files in a worker thread, run one rclone command at a time, verify cloud bytes, and pause or resolve conflicts. |
 | [crates/core/src/sync.rs](../crates/core/src/sync.rs) | Keep chosen iCloud folders and local copies in two-way sync with rclone bisync, and surface pending changes, conflicts, reviews, and backups. |
 | [crates/core/src/places.rs](../crates/core/src/places.rs) | Add an `iCloud Sync` place to the GTK bookmarks and existing Dolphin places, without duplicating or rewriting other entries. |
+| [crates/core/src/settings.rs](../crates/core/src/settings.rs) | Read and write the language, the automatic unlock choice, and the last in-app sign-in time in `settings.ini`, keeping every other line as the Python app's `QSettings` wrote it. |
+| [crates/core/src/autostart.rs](../crates/core/src/autostart.rs) | Create the XDG autostart entry from the installed desktop entry with `--background`, and remove it, together with the Python app's entry when that one runs this app. |
+| [crates/core/src/keyring.rs](../crates/core/src/keyring.rs) | Store, find, and clear the local key in the Secret Service through `secret-tool`, without blocking the window, only while automatic unlock is on. |
+| [crates/core/src/i18n.rs](../crates/core/src/i18n.rs) and [translation_es.rs](../crates/core/src/translation_es.rs) | Translate the app's own text: English is the source, and Spanish comes from a catalog. |
 | [crates/core](../crates/core) | Rust library for the native app without a user interface: paths, profile and mount checks, the upload queue, synced folders, translated text, change signals, and child processes that die with the app. |
 
 Provisioning assumes Ubuntu with GNOME, the `icloud` user, and a prepared medium
@@ -74,8 +80,17 @@ The key stays in memory while connected and is overwritten when the session clea
 it. Disconnect checks the mount identity before running `fusermount3 -u`; a busy or
 replaced mount is preserved, and only the client the session started is ended. An
 existing compatible mount from the terminal lab can be opened and disconnected.
-Child processes report through threads and a channel; the window calls the
-session's `tick` every 200 ms to collect results and compare the kernel's mounts.
+Child processes report through threads and a channel; the app calls the session's
+`tick` every 200 ms to collect results and compare the kernel's mounts.
+
+When a connection that reached the connected state stops on its own, the session
+keeps the key in memory and reconnects after 30 seconds, 2 minutes, and 5 minutes,
+while the window shows **Reconnecting...** and **Cancel** stops waiting. Each attempt
+can sign in to Apple again, which may notify trusted devices when the session has
+expired, so there are only three attempts; a connection that then stays up for ten
+minutes earns them again. A first connection that fails is not retried. Connecting,
+disconnecting, or quitting cancels a pending attempt, and giving up forgets the key.
+Suspend does not stop the rclone client, so resuming needs no reconnection.
 
 ### Native sign-in
 
@@ -110,6 +125,11 @@ removes copies that a crash left behind for more than an hour. Quitting or endin
 the desktop session cancels a running step first. A rejected code ends the attempt;
 signing in again requests a new code.
 
+The app records in `settings.ini` when it last published a profile. Apple trusts a
+signed-in rclone session for 30 days, so five days before that the window offers
+**Renew** in a banner, and a hidden window sends one notification. Profiles signed
+in from the terminal have no recorded time and get no estimate.
+
 Renewal changes the profile bytes. Before replacing them, the app writes
 `profile-links.json`, which maps the new and old profile hashes to the identity of
 the original profile. Either profile therefore keeps that identity after a crash,
@@ -138,7 +158,7 @@ Commands start with the process guard: Linux
 kills an active transfer if the app dies, and the child checks that its parent is
 still the app after arming it, which closes the startup race. A failed guard setup
 starts no rclone command. Commands start from the main thread, to which the kernel
-ties that signal; the preparation worker starts none. The window calls the queue's
+ties that signal; the preparation worker starts none. The app calls the queue's
 `tick` every 100 ms, and active commands also trigger a checkpoint about once per
 second. Connection ownership and profile identity are checked again after each
 checkpoint, before the next command starts. A newly connected profile cannot claim
@@ -168,8 +188,8 @@ directory copy with `--immutable --ignore-times`; the single-file copy path in
 rclone 1.75.2 bypasses that protection. Success requires an independent SHA-256
 download check before releasing the snapshot. Network errors retain local data.
 Disconnect pauses the queue and waits for its command to stop before unmounting
-and releasing the unlocked session; closing the app and the end of the desktop
-session do the same before the window closes. Cloud mutations are never used for
+and releasing the unlocked session; quitting the app and the end of the desktop
+session do the same before the app exits. Cloud mutations are never used for
 cleanup of ordinary queue items.
 
 These checks do not provide a server transaction against another writer creating
@@ -191,8 +211,8 @@ and folders that overlap an existing pair, compared without letter case, are ref
 Pairs are bound to the profile identity that added them, like pending uploads.
 
 The app runs one `rclone bisync` process at a time with the process guard, only
-while it owns an unlocked connection; the window calls the folders' `tick` every
-second for as long as the app runs. A first run copies iCloud into the empty local
+while it owns an unlocked connection; the app calls the folders' `tick` every
+second for as long as it runs. A first run copies iCloud into the empty local
 folder with `--resync-mode path2`, which copies but never deletes. Folders with no
 files keep using such runs, because bisync refuses a normal run with an empty side.
 Later runs compare size and modification time. A periodic local scan, every five
@@ -232,7 +252,7 @@ Results map to states the window shows:
 Before each run, the app removes lock files from its private work folder: this
 single-instance app runs bisync there sequentially, so any lock is left by an
 interrupted run. Disconnect sends SIGINT so bisync can finish started transfers
-and save its state, and kills it after 30 seconds. Disconnect, closing the app, and
+and save its state, and kills it after 30 seconds. Disconnect, quitting the app, and
 the end of the desktop session close the connection only once uploads and sync
 have both stopped.
 
@@ -253,10 +273,12 @@ package.
 
 `dpkg-shlibdeps` and RPM's automatic requirements name the GTK 4, libadwaita, GLib,
 and C library versions the binary links. Both formats also require FUSE 3 and
-rclone 1.75.2 or later. Fedora 45 provides every dependency. Debian 13 and Ubuntu
-24.04 and 26.04 provide GTK and libadwaita, but their rclone predates the iCloud
-backend, so the official rclone package must be installed first. Debian 12 and
-Ubuntu 22.04 lack GTK 4.14 and libadwaita 1.5.
+rclone 1.75.2 or later, and recommend the package that provides `secret-tool` for
+automatic unlock: `libsecret-tools` on Debian and Ubuntu, `libsecret` on Fedora.
+Fedora 45 provides every dependency. Debian 13 and Ubuntu 24.04 and 26.04 provide
+GTK and libadwaita, but their rclone predates the iCloud backend, so the official
+rclone package must be installed first. Debian 12 and Ubuntu 22.04 lack GTK 4.14
+and libadwaita 1.5.
 
 Packages are built and checked in disposable containers. Builds receive only the
 packaged sources; checks receive tracked files, packages, and test programs.
@@ -271,6 +293,35 @@ installer hides the prepared lab shortcut for this user without changing the
 system launcher or account configuration. The desktop file is named after the
 application ID, `io.github.luiscuellar31.IcloudOnLinux`, so the desktop matches
 the app's windows to it.
+
+The app keeps running after its window closes when the desktop shows tray icons
+(StatusNotifierItem, as on KDE and on Ubuntu's GNOME with its AppIndicator
+extension). The icon's tooltip shows the status, and its menu offers **Show
+window**, **Open iCloud Drive**, **Sync now**, and **Quit**. While the window is
+hidden, GApplication notifications report a connection problem, a folder waiting for
+a review, uploads waiting for a decision, and an expiring Apple session; clicking
+one shows the window. Without tray icons, closing a working window asks whether to
+keep syncing; opening the app again shows the hidden window. **Quit** asks first
+while uploads, sync, or the connection are active. Quit, `SIGTERM`, and the end of
+the session pause uploads and sync, unmount, and exit.
+
+**Start at login** copies the installed desktop entry to the user's XDG autostart
+folder with `--background`. The Python app's `icloud-drive.desktop` entry also
+counts when it runs `~/.local/bin/icloud-on-linux` or `icloud-on-linux`, which this
+app replaced, and turning the option off removes it. Started with `--background`,
+the app stays in the tray only when **Unlock automatically on this computer** can
+connect with the key saved in the Secret Service (GNOME Keyring or KWallet). It
+shows the window when the keyring has no key or no tray icon appears within ten
+seconds. That option is off by default. Turning it on asks for confirmation, and
+the key is saved only after it unlocks the session; turning it off deletes it.
+`secret-tool` receives the key through standard input, never as an argument.
+
+The app's text is in English and Spanish. **Language** in the menu chooses
+Automatic, which follows the desktop languages, English, or Español, and applies at
+once: the window is built again in that language while the connection, uploads, and
+sync keep running, and their messages switch when they next change. GTK's own text,
+such as in its menus and tooltips, follows an explicit choice from the next start,
+when the app sets `LANGUAGE` before GTK starts.
 
 The legacy **iCloud Drive** shortcut runs `icloud-linux-start`, which uses the dedicated
 user configuration. If `~/iCloud` is already mounted, it opens the folder without
@@ -293,6 +344,9 @@ with iCloud as the source and a local destination.
 | Docker | `icloud-linux-state` volume, mounted at `/state` | Encrypted `rclone.conf` and files under `downloads/`. They persist after the container closes. |
 | Ubuntu | `~/.config/icloud-linux/rclone.conf` | Dedicated encrypted configuration with `0600` permissions, reused between sessions. |
 | Linux desktop | `~/.config/icloud-linux/profile-links.json` | `0600` map from renewed profile hashes to the identity of the original profile. It contains hashes only. |
+| Linux desktop | `~/.config/icloud-linux/settings.ini` | `0600` language, automatic unlock choice, and the time of the last in-app sign-in, in the format the Python app also reads. It holds no keys or tokens. |
+| Linux desktop | Desktop keyring item `application=icloud-on-linux secret=local-key` | The local key, only while **Unlock automatically on this computer** is on; deleted when it is turned off. |
+| Linux desktop | `~/.config/autostart/io.github.luiscuellar31.IcloudOnLinux.desktop`, or the equivalent under `XDG_CONFIG_HOME` | Present only while **Start at login** is on. |
 | Linux desktop | `~/.config/icloud-linux/.signin-*/` | Private encrypted profile copy during sign-in, removed when the attempt ends. An abrupt exit can leave it behind; it is never used again. |
 | Ubuntu | `~/iCloud` | Mount point, not a complete offline copy. |
 | Ubuntu | rclone VFS cache, under the user cache directory | Contents of opened files; configuration encryption does not encrypt these copies. |
@@ -314,9 +368,9 @@ Dockerfile and the session script needed by the image to the builder.
 
 ## Where behavior is checked
 
-- [crates/core/tests](../crates/core/tests): the native session with local stand-ins
-  for rclone and FUSE, and on Linux a real read-only FUSE mount of a fictional
-  encrypted profile. [crates/core/tests/uploads.rs](../crates/core/tests/uploads.rs)
+- [crates/core/tests](../crates/core/tests): the native session, including automatic
+  reconnection, with local stand-ins for rclone and FUSE, and on Linux a real
+  read-only FUSE mount of a fictional encrypted profile. [crates/core/tests/uploads.rs](../crates/core/tests/uploads.rs)
   runs the upload queue with the real rclone against local fictional remotes:
   verification, Keep both and Skip, interrupted uploads and crashes, a WebDAV
   outage, a changed profile, and cloud edits before the copy or during verification.
@@ -326,11 +380,24 @@ Dockerfile and the session script needed by the image to the builder.
   folder that continue without review, a killed run, a deleted iCloud folder, and
   lost sync history. [crates/core/src/places.rs](../crates/core/src/places.rs)
   checks the sidebar places in temporary GTK and Dolphin settings.
+  [crates/core/src/settings.rs](../crates/core/src/settings.rs) and
+  [crates/core/src/autostart.rs](../crates/core/src/autostart.rs) check
+  `settings.ini` and the autostart entries, including the Python app's, in temporary
+  folders. [crates/core/tests/keyring.rs](../crates/core/tests/keyring.rs) stores,
+  finds, and clears a fictional key in gnome-keyring inside a private D-Bus session
+  with a temporary home, and [crates/core/tests/translations.rs](../crates/core/tests/translations.rs)
+  requires a Spanish entry with the same placeholders for every translated text.
+- [crates/app/src/tray.rs](../crates/app/src/tray.rs): the tray icon and its menu
+  against a stand-in StatusNotifierWatcher on a private `dbus-daemon`.
 - [crates/app/tests/visible](../crates/app/tests/visible): the visible window on a
-  Wayland or X11 display. It adds a synced folder with its sidebar place in
-  temporary settings, continues its review of mass deletions, and stops syncing it; uploads files and decides a conflict with Keep
-  both; disconnects during an upload and resumes it after reconnecting; and ends the
-  app during an upload. Then, in a new window, it connects, opens the file manager,
+  Wayland or X11 display. While connected, it switches to Spanish and back; turns
+  Start at login on and off in temporary folders; and closes the window to a
+  stand-in tray, which keeps the app connected. It adds a synced folder with its
+  sidebar place in temporary settings, continues its review of mass deletions, and
+  stops syncing it; uploads files and decides a conflict with Keep both; disconnects
+  during an upload and resumes it after reconnecting; and ends the app during an
+  upload. Then, in a new window, it connects, reconnects on its own after the mount
+  drops and stops waiting with Cancel after a second drop, opens the file manager,
   and disconnects.
 - [crates/core/tests/auth.rs](../crates/core/tests/auth.rs): native sign-in, 2FA,
   SMS, renewal identity, cancellation, and save failures through a local rclone

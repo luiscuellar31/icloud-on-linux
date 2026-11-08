@@ -61,17 +61,52 @@ Instead of building on Ubuntu, you can install the `.deb` package described in t
 
 Open **iCloud on Linux**, enter your local key, and select **Connect**. When the
 status shows **Connected**, **Open iCloud Drive** opens `~/iCloud` in Files.
-**Cancel** stops a connection attempt, and **Disconnect** in the menu unmounts the
-folder and ends its client. Close files first if disconnecting reports a busy
-folder. Closing the connected app asks whether to disconnect and close it. An
-existing read-only mount from the terminal lab can be opened or disconnected
-without entering a key.
+**Cancel** stops a connection attempt, and **Disconnect** or **Quit** in the menu
+unmounts the folder and ends its client. Close files first if disconnecting reports
+a busy folder. An existing read-only mount from the terminal lab can be opened or
+disconnected without entering a key.
+
+## Use the app
+
+The window shows one status line: **Not signed in**, **Disconnected**,
+**Connecting...**, **Connected** with a summary such as **Up to date** or
+**Review needed**, **Reconnecting...**, or **Needs attention** with an explanation.
+
+While connected, the window offers **Open iCloud Drive** and **Add folder**, lists
+the folders on this computer, and keeps uploads under **Uploads** at the bottom.
+The menu button at the top right holds **Upload files...**, **Renew Apple
+session...**, **Start at login**, **Unlock automatically on this computer**,
+**Language**, **Disconnect**, and **Quit**. **Language** follows the desktop
+languages by default; choose English or Español to change it at once.
+
+Closing the window keeps the app connected and syncing. On Ubuntu's GNOME, KDE,
+and other desktops with tray icons, its icon in the top bar or panel shows the
+status and offers **Show window**, **Open iCloud Drive**, **Sync now**, and
+**Quit**; the first close explains this in a notification, and later notifications
+report what needs you while the window is closed. Without tray icons, closing a
+connected window asks whether to keep syncing; open the app again from the
+applications menu to see its window. Opening the app while it runs shows the
+existing window. **Quit** asks first while the app is working, then pauses uploads
+and sync, disconnects, and exits.
+
+If a working connection drops, the app reconnects on its own up to three times,
+after 30 seconds, 2 minutes, and 5 minutes. **Cancel** stops waiting.
+
+**Start at login** opens the app when you log in. To connect without typing the
+local key, also turn on **Unlock automatically on this computer**, in the menu or
+below the key field: after the key unlocks the session, the app saves it in your
+desktop keyring (GNOME Keyring or KWallet), and at login it then starts in the
+tray. Anyone who can use your Linux account can then open your iCloud Drive,
+because your Linux login protects the keyring. The option is off by default and
+needs `secret-tool` (`sudo apt install libsecret-tools`); turning it off deletes
+the saved key. With automatic login, the desktop may ask you to create or unlock a
+keyring.
 
 ## Sign in or renew the session
 
 On first use, select **Sign in to iCloud**. To renew, choose **Renew Apple
-session...** in the menu; a connected app disconnects first. Disconnect an older
-terminal mount first.
+session...** in the menu, or **Renew** when the app warns that the session ends
+soon; a connected app disconnects first. Disconnect an older terminal mount first.
 
 1. Enter the local key. For a new session, choose a local key and confirm it; it
    encrypts the saved session and is separate from your Apple password.
@@ -80,6 +115,9 @@ terminal mount first.
    message instead, select **Send SMS**, choose a phone if several are listed, and
    enter the code from that message.
 4. When the dialog confirms the sign-in, close it and connect with your local key.
+
+Apple trusts a signed-in session for 30 days. After signing in from the app, the
+window warns five days before that and offers **Renew**.
 
 Renew an expired session with the same steps and the Apple account already saved
 in the app. The current session is kept until the new one can read iCloud Drive,
@@ -106,7 +144,7 @@ The file manager folder stays read-only; uploads go through the app queue.
 
 **Pause uploads** retains pending copies. **Resume uploads** rechecks the cloud
 before retrying paused or failed rows. Restarted queues stay paused until you
-connect and resume them. Disconnect and closing the app pause an active upload
+connect and resume them. Disconnect and quitting the app pause an active upload
 before closing its connection. Files in another saved profile stay paused.
 
 Completed means a separate cloud download matched the local snapshot SHA-256.
@@ -129,8 +167,9 @@ Files or Dolphin, sync a folder:
    the first copy downloads every file, so check the free disk space.
 3. Work in that local folder as usual, even offline. While connected, local changes
    sync within seconds and changes from other devices within two minutes. Select
-   **Sync now** in the folder's menu, opened with a right click, to sync at once.
-   Syncing pauses on disconnect and resumes on the next connection.
+   **Sync now** in the folder's menu, opened with a right click, to sync at once,
+   or **Sync now** on the tray icon for every folder. Syncing pauses on disconnect
+   and resumes on the next connection.
 
 If the same file changed here and elsewhere, both versions are kept: the newer
 one keeps the name, and the other ends with `.conflict1` before its extension.
@@ -158,7 +197,7 @@ not encrypted.
 
 | Desktop | Environment checked | Result |
 | --- | --- | --- |
-| GNOME 46 and Files | Ubuntu 24.04 ARM64, separate test user, headless GNOME Shell without X11 | Connect, state, a synced folder with a review of mass deletions and Stop syncing, an upload conflict decided with Keep both, pause on disconnect and resume, ending the app during an upload, Open with Files observed, and safe disconnect passed. |
+| GNOME 46 and Files | Ubuntu 24.04 ARM64, separate test user, headless GNOME Shell without X11 | Connect, state, switching to Spanish and back, Start at login, closing to a stand-in tray, a synced folder with a review of mass deletions and Stop syncing, an upload conflict decided with Keep both, pause on disconnect and resume, ending the app during an upload, reconnecting after a dropped mount, Open with Files observed, and safe disconnect passed. |
 | KDE Plasma 5.27 KWin and Dolphin | Ubuntu 24.04 ARM64, separate test user, virtual KWin Wayland without X11 | The same controls passed, with Dolphin observed after Open. |
 | X11 | Ubuntu 24.04 ARM64, separate test user, Xvfb without a desktop shell | The same controls passed, except Open. |
 

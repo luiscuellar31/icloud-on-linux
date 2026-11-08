@@ -91,17 +91,26 @@ upload, and crashes. Synced folders run real bisync between a private local fold
 and a fictional `icloud:` folder: the first copy, automatic local changes, remote
 changes with Backups, a conflict, held mass deletions, renames in a small folder
 that continue without review, a killed run, a deleted iCloud folder, and lost sync
-history.
+history. The keyring check stores, finds, and clears a fictional key in
+gnome-keyring inside a private D-Bus session with a temporary home, so it never
+reaches your keyring; it is skipped without `secret-tool`, `dbus-run-session`, and
+`gnome-keyring-daemon`. The tray check registers the icon with a stand-in watcher
+on a private `dbus-daemon`.
 
 Keep `unsafe` code out of the crates except where a system call requires it, and
 explain each such block in a `SAFETY` comment.
 
 When `WAYLAND_DISPLAY` or `DISPLAY` is set, as in a desktop session, `cargo test`
-also runs the visible window check with a fictional encrypted profile. It syncs a
-folder, continues its review of mass deletions, and stops syncing it; uploads files
-and decides a conflict; disconnects during an upload and resumes it after
-reconnecting; and ends the app during an upload. Then, in a new window, it connects
-and disconnects. To also click Open and wait for the file manager, run:
+also runs the visible window check with a fictional encrypted profile. While
+connected, it switches to Spanish and back, turns Start at login on and off in
+temporary folders, and closes the window to a stand-in tray. It syncs a folder,
+continues its review of mass deletions, and stops syncing it; uploads files and
+decides a conflict; disconnects during an upload and resumes it after reconnecting;
+and ends the app during an upload. Then, in a new window, it connects, reconnects
+after the mount drops, and disconnects. In a desktop session with a tray, the
+check's icon appears there while it runs; the private sessions of
+`tests/check_wayland.sh` keep it off your desktop. To also click Open and wait for
+the file manager, run:
 
 ```sh
 cargo test --package icloud-on-linux --test visible -- --expect-file-manager nautilus

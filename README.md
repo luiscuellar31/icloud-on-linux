@@ -10,7 +10,8 @@ Dolphin, so you can use the iCloud storage you already have without leaving Linu
 
 The project is in early development. A native app, written in Rust with GTK4,
 connects your saved session and opens iCloud Drive in Files on Ubuntu with GNOME,
-using rclone to reach your account.
+using rclone to reach your account. It speaks English and Spanish and keeps
+syncing from the tray after you close its window.
 
 ## Features
 
@@ -18,8 +19,12 @@ using rclone to reach your account.
 - Browse iCloud Drive in GNOME Files or KDE Dolphin and open files with your usual apps.
 - Download files when you open them and keep a local cache.
 - Reuse your saved session, encrypted with a separate local key.
-- Connect and disconnect from a native desktop window, and sign in or renew the
-  session there without a terminal.
+- Connect and disconnect from a native desktop window in English or Spanish, and
+  sign in or renew the session there without a terminal.
+- Keep syncing from a tray icon after you close the window, and get notified when
+  something needs you.
+- Optionally start at login and unlock through your desktop keyring, reconnect
+  after a dropped connection, and get a reminder before the Apple session expires.
 - Upload files with a visible queue, pause and resume, and conflict decisions.
 - Create, edit, move, and delete files from Files or Dolphin in synced folders,
   with both versions kept on conflicts and mass deletions held for review.
