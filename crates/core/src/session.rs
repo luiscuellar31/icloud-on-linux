@@ -23,6 +23,10 @@ use crate::{Failure, tr};
 
 const CONNECT_SECONDS: u64 = 90;
 const KILL_SECONDS: u64 = 5;
+/// A connection that worked and then dropped is retried after these waits. Each attempt may sign in to Apple
+/// again, so attempts are few; a connection that stays up for `STABLE_SECONDS` earns the full set again.
+const RECONNECT_SECONDS: [u64; 3] = [30, 120, 300];
+const STABLE_SECONDS: u64 = 600;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum State {
@@ -73,6 +77,11 @@ struct Inner {
     deadline: Option<Instant>,
     stop_error: Option<String>,
     kill_client_at: Option<Instant>,
+    available_at: Option<Instant>,
+    retry_key: Zeroizing<String>,
+    retries: usize,
+    reconnect_at: Option<Instant>,
+    reconnect_delays: Vec<Duration>,
 }
 
 impl Session {
@@ -81,6 +90,7 @@ impl Session {
             paths,
             inner: RefCell::new(Inner {
                 message: tr!("Connect to open your files in the file manager."),
+                reconnect_delays: RECONNECT_SECONDS.map(Duration::from_secs).to_vec(),
                 ..Inner::default()
             }),
             changed: Signal::default(),
@@ -94,6 +104,11 @@ impl Session {
     /// Look for rclone, fusermount3, and the helper's commands in `path` instead of the inherited `PATH`.
     pub fn set_search_path(&self, path: Option<OsString>) {
         *self.search_path.borrow_mut() = path;
+    }
+
+    /// Wait `delays` before the automatic reconnections, instead of 30 seconds, 2 minutes, and 5 minutes.
+    pub fn set_reconnect_delays(&self, delays: &[Duration]) {
+        self.inner.borrow_mut().reconnect_delays = delays.to_vec();
     }
 
     /// Read mounts with `reader` instead of /proc/self/mountinfo.
@@ -129,6 +144,18 @@ impl Session {
 
     pub fn checking(&self) -> bool {
         self.inner.borrow().check.is_some()
+    }
+
+    /// Whether a dropped connection will reconnect on its own.
+    pub fn reconnecting(&self) -> bool {
+        self.inner.borrow().reconnect_at.is_some()
+    }
+
+    fn cancel_reconnect(&self) {
+        let mut inner = self.inner.borrow_mut();
+        inner.retry_key = Zeroizing::new(String::new());
+        inner.retries = 0;
+        inner.reconnect_at = None;
     }
 
     pub fn current_mount(&self) -> Option<Mount> {
@@ -184,6 +211,11 @@ impl Session {
     }
 
     pub fn start(&self, key: &str) {
+        self.cancel_reconnect();
+        self.begin(key);
+    }
+
+    fn begin(&self, key: &str) {
         if self.busy() || self.client_running() || self.current_mount().is_some() {
             return;
         }
@@ -211,6 +243,7 @@ impl Session {
         {
             let mut inner = self.inner.borrow_mut();
             inner.key = Zeroizing::new(key.to_owned());
+            inner.available_at = None;
             inner.device = format!("icloud-on-linux-{device}");
             inner.deadline = Some(Instant::now() + Duration::from_secs(CONNECT_SECONDS));
         }
@@ -324,6 +357,18 @@ impl Session {
 
     /// Collect process results and compare the mount with the expected state.
     pub fn tick(&self) {
+        let due = self.inner.borrow().reconnect_at.is_some_and(|at| Instant::now() >= at);
+        if due {
+            let key = {
+                let mut inner = self.inner.borrow_mut();
+                inner.reconnect_at = None;
+                inner.retry_key.clone()
+            };
+            self.begin(&key);
+            if self.state() != State::Connecting {
+                self.cancel_reconnect();
+            }
+        }
         let finished = |process: &Option<Process>| {
             process.as_ref().and_then(|process| {
                 process.events().into_iter().find_map(|event| match event {
@@ -386,6 +431,7 @@ impl Session {
                     inner.mount_id = current.map(|mount| mount.identifier);
                     inner.owns_mount = true;
                     inner.deadline = None;
+                    inner.available_at = Some(Instant::now());
                 }
                 self.set_status(
                     State::Available,
@@ -443,6 +489,7 @@ impl Session {
     pub fn stop(&self) {
         if self.state() != State::Disconnecting {
             self.inner.borrow_mut().stop_error = None;
+            self.cancel_reconnect();
         }
         self.stop_preserving_error();
     }
@@ -506,10 +553,48 @@ impl Session {
             inner.owns_mount = false;
             inner.deadline = None;
         }
+        // Only a connection that worked, or a retry of one, reconnects on its own; a failed first attempt does not.
+        let (key, delay) = {
+            let mut inner = self.inner.borrow_mut();
+            let key = std::mem::take(&mut inner.key);
+            let reconnect = inner.stop_error.is_some()
+                && !key.is_empty()
+                && (inner.available_at.is_some() || !inner.retry_key.is_empty());
+            let stable = inner
+                .available_at
+                .is_some_and(|at| at.elapsed() >= Duration::from_secs(STABLE_SECONDS));
+            if reconnect && stable {
+                inner.retries = 0;
+            }
+            let delay = reconnect
+                .then(|| inner.reconnect_delays.get(inner.retries).copied())
+                .flatten();
+            (key, delay)
+        };
         self.clear_profile();
+        if let Some(delay) = delay {
+            {
+                let mut inner = self.inner.borrow_mut();
+                inner.retries += 1;
+                inner.retry_key = key;
+                inner.reconnect_at = Some(Instant::now() + delay);
+                inner.stop_error = None;
+            }
+            self.set_status(
+                State::Error,
+                tr!(
+                    "The connection stopped. Reconnecting automatically in {seconds} seconds.",
+                    seconds = delay.as_secs()
+                ),
+            );
+            return;
+        }
         let error = self.inner.borrow_mut().stop_error.take();
         match error {
-            Some(error) => self.set_status(State::Error, error),
+            Some(error) => {
+                self.cancel_reconnect();
+                self.set_status(State::Error, error);
+            }
             None => self.set_status(State::Disconnected, tr!("Disconnected from iCloud Drive.")),
         }
     }
@@ -526,10 +611,12 @@ impl Session {
         self.continue_stop();
     }
 
-    /// Forget the key and remove the private profile copy.
+    /// Forget the key and remove the private profile copy. A scheduled reconnection keeps its key again
+    /// afterwards; every other stop forgets it.
     fn clear_profile(&self) {
         let mut inner = self.inner.borrow_mut();
         inner.key = Zeroizing::new(String::new());
+        inner.retry_key = Zeroizing::new(String::new());
         inner.profile_id.clear();
         inner.profile = None;
     }

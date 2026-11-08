@@ -8,6 +8,7 @@ pub static SPANISH: &[(&str, &str)] = &[
     ("Connecting...", "Conectando..."),
     ("Connected", "Conectado"),
     ("Disconnecting...", "Desconectando..."),
+    ("Reconnecting...", "Reconectando..."),
     ("Needs attention", "Requiere atención"),
     ("Review needed", "Revisión pendiente"),
     ("Sync problem", "Problema de sincronización"),
@@ -229,6 +230,10 @@ pub static SPANISH: &[(&str, &str)] = &[
         "La conexión montada desapareció. Vuelve a conectarte para intentarlo de nuevo.",
     ),
     ("Disconnected from iCloud Drive.", "Desconectado de iCloud Drive."),
+    (
+        "The connection stopped. Reconnecting automatically in {seconds} seconds.",
+        "La conexión se detuvo. Se reconectará automáticamente en {seconds} segundos.",
+    ),
     (
         "The folder is used by another connection. It was left unchanged.",
         "Otra conexión usa la carpeta. No se modificó.",

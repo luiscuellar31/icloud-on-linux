@@ -96,6 +96,8 @@ pub struct Facts {
     pub client: bool,
     pub checking: bool,
     pub owns_mount: bool,
+    /// A connection that dropped waits to reconnect on its own.
+    pub reconnecting: bool,
     pub key_typed: bool,
     pub signed_in: bool,
     pub renewing: bool,
@@ -137,6 +139,7 @@ pub fn screen(facts: &Facts) -> Screen {
         State::Available if facts.uploads == Uploads::Busy => (connected(tr!("Uploading...")), Tone::Busy),
         State::Available if facts.folders == Folders::UpToDate => (connected(tr!("Up to date")), Tone::Ok),
         State::Available => (tr!("Connected"), Tone::Ok),
+        _ if facts.reconnecting => (tr!("Reconnecting..."), Tone::Busy),
         State::Error => (tr!("Needs attention"), Tone::Error),
         State::Connecting => (tr!("Connecting..."), Tone::Busy),
         State::Disconnecting => (tr!("Disconnecting..."), Tone::Busy),
@@ -154,11 +157,12 @@ pub fn screen(facts: &Facts) -> Screen {
         detail,
         progress: busy,
         welcome: can_connect && !facts.signed_in,
-        key_panel: can_connect && facts.signed_in,
+        key_panel: can_connect && facts.signed_in && !facts.reconnecting,
         connect: can_connect && facts.key_typed,
         open_visible: available,
         open: available && facts.mounted && facts.compatible,
-        cancel: facts.state == State::Connecting,
+        // Cancel also stops waiting for a reconnection.
+        cancel: facts.state == State::Connecting || facts.reconnecting,
         cancel_enabled: !facts.disconnect_pending,
         disconnect: !facts.disconnect_pending
             && facts.state != State::Disconnecting
@@ -371,6 +375,17 @@ mod tests {
             ..facts(State::Connecting)
         });
         assert!(result.progress && result.cancel && result.disconnect && !result.key_panel);
+    }
+
+    #[test]
+    fn a_dropped_connection_waits_to_reconnect_and_can_be_cancelled() {
+        let result = screen(&Facts {
+            reconnecting: true,
+            ..facts(State::Error)
+        });
+        assert_eq!((result.status.as_str(), result.tone), ("Reconnecting...", Tone::Busy));
+        assert!(result.cancel && result.cancel_enabled && !result.key_panel && !result.welcome);
+        assert_eq!(result.detail.as_deref(), Some("Fixture message"));
     }
 
     #[test]

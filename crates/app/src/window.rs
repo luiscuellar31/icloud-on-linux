@@ -307,6 +307,7 @@ impl Window {
             client: self.session.client_running(),
             checking: self.session.checking(),
             owns_mount: self.session.owns_mount(),
+            reconnecting: self.session.reconnecting(),
             key_typed: typed(&self.key),
             signed_in: std::fs::symlink_metadata(&self.session.paths().config).is_ok(),
             renewing: parts.renew_pending.get(),
@@ -355,6 +356,10 @@ impl Window {
     }
 
     fn sign_in(&self) {
+        // A waiting reconnection would start a connection during sign-in; signing in replaces it.
+        if self.session.reconnecting() {
+            self.session.stop();
+        }
         let session = self.session.clone();
         let dialog = SignIn::present(&self.window, self.session.clone(), move || {
             session.set_status(State::Disconnected, tr!("Signed in. Enter your local key to connect."));

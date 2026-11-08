@@ -28,6 +28,7 @@ case "$1" in
         echo icloud: ;;
     mount)
         [ "$RCLONE_CONFIG_PASS" = native-fixture-key ] || exit 91
+        [ -e "@FAILS@" ] && exit 1
         while [ "$#" -gt 0 ]; do
             [ "$1" = --devname ] && device=$2
             shift
@@ -52,6 +53,7 @@ impl Bench {
         let script = STUB
             .replace("@LOG@", root.path().join("calls.log").to_str().unwrap())
             .replace("@BUSY@", root.path().join("busy").to_str().unwrap())
+            .replace("@FAILS@", root.path().join("mount-fails").to_str().unwrap())
             .replace("@MARKER@", root.path().join("mounted").to_str().unwrap());
         for name in ["rclone", "fusermount3"] {
             fs::write(bin.join(name), &script).unwrap();
@@ -105,6 +107,15 @@ impl Bench {
             self.session.tick();
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// How many times rclone was asked to mount.
+    fn mounts(&self) -> usize {
+        fs::read_to_string(self.file("calls.log"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| line.starts_with("rclone --ask-password=false mount "))
+            .count()
     }
 
     fn connect(&self) {
@@ -187,4 +198,77 @@ fn connecting_can_be_cancelled_before_a_mount_exists() {
     bench.wait(|session| session.state() == State::Disconnected && !session.running());
     assert!(!bench.file("mounted").exists());
     assert!(!bench.session.unlocked());
+}
+
+#[test]
+fn a_dropped_connection_reconnects_with_the_same_key() {
+    let bench = Bench::new();
+    bench.session.set_reconnect_delays(&[Duration::ZERO, Duration::ZERO]);
+    bench.connect();
+    // The fixture mount and its client end together, as when rclone exits on its own.
+    fs::remove_file(bench.file("mounted")).unwrap();
+    bench.wait(|session| session.state() != State::Available);
+    bench.wait(|session| session.state() == State::Available);
+    assert_eq!(bench.mounts(), 2);
+    assert!(bench.session.unlocked());
+    assert!(!fs::read_to_string(bench.file("calls.log")).unwrap().contains(KEY));
+    bench.disconnect();
+}
+
+#[test]
+fn reconnection_gives_up_after_a_few_attempts_and_forgets_the_key() {
+    let bench = Bench::new();
+    bench.session.set_reconnect_delays(&[Duration::ZERO, Duration::ZERO]);
+    bench.connect();
+    fs::write(bench.file("mount-fails"), "").unwrap();
+    fs::remove_file(bench.file("mounted")).unwrap();
+    bench.wait(|session| {
+        bench.mounts() == 3 && session.state() == State::Error && !session.reconnecting() && !session.client_running()
+    });
+    assert!(
+        bench.session.message().contains("Check your network"),
+        "{}",
+        bench.session.message()
+    );
+    // Nothing is left to reconnect with: the key is forgotten.
+    for _ in 0..20 {
+        bench.session.tick();
+    }
+    assert_eq!(bench.mounts(), 3);
+    assert!(!bench.session.unlocked() && bench.session.profile_id().is_empty());
+}
+
+#[test]
+fn a_first_connection_that_fails_is_not_retried() {
+    let bench = Bench::new();
+    bench.session.set_reconnect_delays(&[Duration::ZERO, Duration::ZERO]);
+    fs::write(bench.file("mount-fails"), "").unwrap();
+    bench.session.start(KEY);
+    bench.wait(|session| session.state() == State::Error && !session.client_running());
+    for _ in 0..20 {
+        bench.session.tick();
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert_eq!(bench.mounts(), 1);
+    assert!(!bench.session.reconnecting());
+}
+
+#[test]
+fn disconnecting_cancels_a_pending_reconnection() {
+    let bench = Bench::new();
+    bench.connect();
+    fs::remove_file(bench.file("mounted")).unwrap();
+    bench.wait(|session| session.reconnecting());
+    assert!(
+        bench
+            .session
+            .message()
+            .contains("Reconnecting automatically in 30 seconds"),
+        "{}",
+        bench.session.message()
+    );
+    bench.session.stop();
+    bench.wait(|session| session.state() == State::Disconnected);
+    assert!(!bench.session.reconnecting());
+    assert_eq!(bench.mounts(), 1);
 }

@@ -1,8 +1,8 @@
 //! The visible window with the fictional profile: connect with the local key, choose another language while
 //! connected, sync a folder and continue its review, upload files and decide a conflict, disconnect during an upload
-//! and resume it, and end the app during an upload; then, in a new window, connect, open the file manager, and
-//! disconnect. It runs only when `WAYLAND_DISPLAY` or `DISPLAY` is set; Open is clicked only with
-//! `--expect-file-manager NAME`, which then waits for that process to start.
+//! and resume it, and end the app during an upload; then, in a new window, connect, reconnect after the connection
+//! drops, open the file manager, and disconnect. It runs only when `WAYLAND_DISPLAY` or `DISPLAY` is set; Open is
+//! clicked only with `--expect-file-manager NAME`, which then waits for that process to start.
 mod folders;
 #[path = "../../../core/tests/support/mod.rs"]
 mod support;
@@ -13,12 +13,14 @@ use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::rc::Rc;
+use std::time::Duration;
 use std::{env, fs};
 
 use adw::prelude::*;
 use gtk::gio;
 use icloud_core::session::{Session, State};
 use icloud_on_linux::app::App;
+use icloud_on_linux::window::Window;
 
 use ui::{button, shows, wait};
 
@@ -100,6 +102,7 @@ fn main() {
     let app = show_app(&application, &fixture);
     let (session, window) = (&app.parts.session, app.window());
     ui::connect(&window, session);
+    check_reconnect(&window, session, &fixture);
     let open = button(&window, "Open iCloud Drive");
     assert!(open.is_sensitive());
     if let Some(name) = &file_manager {
@@ -169,4 +172,36 @@ fn check_language(app: &App, fixture: &support::Fixture) {
         );
     }
     println!("PASS: choosing a language showed the window in it, kept the connection, and saved the choice.");
+}
+
+/// Drop the connection as a failing mount does: the window waits to reconnect and then reconnects on its own. After
+/// a second drop, Cancel stops waiting, and connecting with the key works again.
+fn check_reconnect(window: &Window, session: &Session, fixture: &support::Fixture) {
+    session.set_reconnect_delays(&[Duration::from_secs(1), Duration::from_secs(600)]);
+    let drop_connection = || {
+        let unmounted = Command::new("fusermount3")
+            .arg("-uz")
+            .arg(&fixture.paths.mount)
+            .status()
+            .unwrap();
+        assert!(unmounted.success());
+        wait(30, "the window waits to reconnect", || shows(window, "Reconnecting..."));
+        assert!(button(window, "Cancel").is_drawable());
+        let connect = |found: &gtk::Button| found.label().as_deref() == Some("Connect");
+        assert!(
+            ui::find(window, connect).is_none(),
+            "the window asks for the key while reconnecting"
+        );
+    };
+    drop_connection();
+    wait(60, "the connection comes back", || session.state() == State::Available);
+    assert!(shows(window, "Connected"), "the window does not say it reconnected");
+    drop_connection();
+    button(window, "Cancel").emit_clicked();
+    wait(30, "waiting to reconnect stops", || {
+        session.state() == State::Disconnected && !session.reconnecting()
+    });
+    assert!(button(window, "Connect").is_drawable());
+    println!("PASS: a dropped connection reconnected on its own, and Cancel stopped waiting to reconnect.");
+    ui::connect(window, session);
 }
