@@ -2,7 +2,8 @@
 
 The project uses rclone 1.75.2 to access iCloud Drive from Linux. It provides a
 Docker terminal lab, a read-only FUSE mount on Ubuntu 24.04 with GNOME, and a native
-app written in Rust with GTK4 and libadwaita that controls that mount. The visible
+app written in Rust with GTK4 and libadwaita that controls that mount and keeps
+two-way synced folders for editing. The visible
 app is checked with GNOME 46 and KDE Plasma 5.27 on headless Wayland compositors.
 Its `.deb` and `.rpm` packages are checked in Debian 13, Ubuntu 24.04, Ubuntu 26.04,
 and Fedora 45 containers.
@@ -19,6 +20,7 @@ and Fedora 45 containers.
 | [scripts/provision-desktop.sh](../scripts/provision-desktop.sh) | Prepare the dedicated VM desktop and shortcuts using resources from its `cidata` medium. |
 | [crates/app/src/main.rs](../crates/app/src/main.rs) | Start the app for the desktop user; GApplication keeps one running copy and shows its window when opened again. |
 | [crates/app/src/window.rs](../crates/app/src/window.rs) and [view.rs](../crates/app/src/view.rs) | Present the connection status, masked key entry, file manager opening, and safe close; `view.rs` decides what to show and is tested without a display. |
+| [crates/app/src/folders.rs](../crates/app/src/folders.rs) | Show the synced folders: Add folder, each folder's state, a context menu with Open, Sync now, Backups, and Stop syncing, and Review for folders that stopped. |
 | [crates/app/src/uploads.rs](../crates/app/src/uploads.rs) | Show the upload queue: the cloud folder for new files, the file dialog, each row's state and progress, and Resume, Pause, Skip, and Keep both. |
 | [scripts/install_desktop.sh](../scripts/install_desktop.sh) | Build the app with Cargo and install it, its helper, and its desktop entry for the current user. |
 | [packaging/build.sh](../packaging/build.sh) | Build the `.deb` and `.rpm` with Cargo, `dpkg-deb`, and `rpmbuild` in disposable Debian 13 and Fedora 45 containers. |
@@ -29,7 +31,8 @@ and Fedora 45 containers.
 | [crates/core/src/session.rs](../crates/core/src/session.rs) | Unlock the saved profile with the local key, mount iCloud Drive read-only through rclone, and disconnect only the app's own mount. |
 | [crates/core/src/uploads.rs](../crates/core/src/uploads.rs) | Own private upload snapshots, durable queue storage, path validation, and local cleanup. |
 | [crates/core/src/transfers.rs](../crates/core/src/transfers.rs) | Prepare files in a worker thread, run one rclone command at a time, verify cloud bytes, and pause or resolve conflicts. |
-| [crates/core](../crates/core) | Rust library for the native app without a user interface: paths, profile and mount checks, the upload queue, translated text, change signals, and child processes that die with the app. |
+| [crates/core/src/sync.rs](../crates/core/src/sync.rs) | Keep chosen iCloud folders and local copies in two-way sync with rclone bisync, and surface pending changes, conflicts, reviews, and backups. |
+| [crates/core](../crates/core) | Rust library for the native app without a user interface: paths, profile and mount checks, the upload queue, synced folders, translated text, change signals, and child processes that die with the app. |
 
 Provisioning assumes Ubuntu with GNOME, the `icloud` user, and a prepared medium
 containing scripts, the rclone package, and its checksum. It verifies the package
@@ -178,6 +181,62 @@ same-size, shorter, and longer edits before verification; they do not establish
 an atomic create-if-absent guarantee. A mismatched download becomes Conflict,
 including a stream that grows beyond the expected size, and retains the snapshot.
 
+## Synced folders
+
+Files and Dolphin edit synced folders; the explorer mount stays read-only. Each
+synced folder pairs an iCloud Drive folder, chosen inside the mount, with a new
+private local folder under `iCloud Sync/` next to the mount point. The whole drive
+and folders that overlap an existing pair, compared without letter case, are refused.
+Pairs are bound to the profile identity that added them, like pending uploads.
+
+The app runs one `rclone bisync` process at a time with the process guard, only
+while it owns an unlocked connection; the window calls the folders' `tick` every
+second for as long as the app runs. A first run copies iCloud into the empty local
+folder with `--resync-mode path2`, which copies but never deletes. Folders with no
+files keep using such runs, because bisync refuses a normal run with an empty side.
+Later runs compare size and modification time. A periodic local scan, every five
+seconds or less often for large folders, starts a run after local changes; iCloud
+is polled every two minutes and once after each reconnect.
+
+Every run uses `--resilient --recover --max-lock 2m` and excludes editor lock and
+temporary files. Conflicts use `--conflict-resolve newer`: the newer version keeps
+the name, and the other is kept on both sides as `name.conflictN.ext`. bisync records
+the winner only on its next run, so the app starts one more run whenever conflict
+copies appear; deleting either version afterwards then propagates normally.
+
+A local deletion moves the iCloud item to Recently Deleted, as rclone removes
+iCloud items to the trash. A deletion or replacement arriving from iCloud moves the
+local file into that run's private Backups folder through `--backup-dir1`; each
+run's folder is named by its time in UTC.
+
+Results map to states the window shows:
+
+- bisync aborts without changes when more than half the files would be deleted or
+  all files changed. **Review...** then asks, and **Continue** allows one run with
+  `--force`.
+- An empty or missing side, or a missing or untrusted sync history, also stops
+  without changes. **Continue** recreates the iCloud folder if needed and runs a
+  copy-only restore: where both sides differ, iCloud wins and Backups keep the
+  local bytes.
+- Other failures retry after a minute; local changes do not restart a failed run
+  sooner.
+- Names that differ only in letter case pause the folder before bisync runs,
+  because iCloud Drive treats them as one name and one could replace the other.
+
+Before each run, the app removes lock files from its private work folder: this
+single-instance app runs bisync there sequentially, so any lock is left by an
+interrupted run. Disconnect sends SIGINT so bisync can finish started transfers
+and save its state, and kills it after 30 seconds. Disconnect, closing the app, and
+the end of the desktop session close the connection only once uploads and sync
+have both stopped.
+
+Like uploads, sync has no server transaction. iCloud writes cannot be made
+conditional, so a change on another device that races a transfer of the same file
+can still be replaced; ordinary edits elsewhere are detected before each run. Moves
+and renames transfer files again: local ones upload under the new name and send the
+old iCloud copies to Recently Deleted, while moves made elsewhere download again and
+put the old local copies in Backups. Moved files count toward the deletion review.
+
 ## Packages
 
 The `.deb` and `.rpm` are built for one architecture and contain the app binary,
@@ -234,6 +293,8 @@ with iCloud as the source and a local destination.
 | Linux desktop | `~/.cache/icloud-on-linux/vfs/`, or the equivalent under `XDG_CACHE_HOME` | The native app's VFS cache, with the same contents and limits. |
 | Linux desktop | `$XDG_RUNTIME_DIR/icloud-on-linux/session-*/` | Private copy of the encrypted profile while connected, removed on disconnect. The runtime directory is in memory and is cleared when the user logs out. |
 | Linux desktop | `~/.cache/icloud-on-linux/uploads/`, or the equivalent under `XDG_CACHE_HOME` | Private unencrypted payload snapshots and a `0600` journal containing filenames, destinations, hashes, profile fingerprints, and state. Pending copies survive disconnect and restart. |
+| Linux desktop | `~/iCloud Sync/` | Full local copies of synced folders, in `0700` folders. They are not encrypted and stay when syncing stops. |
+| Linux desktop | `~/.cache/icloud-on-linux/sync/`, or the equivalent under `XDG_CACHE_HOME` | `0600` list of synced folders with their profile identities, bisync state per folder, and per-run Backups of local files replaced or deleted from iCloud. Losing the state stops sync until **Continue** rebuilds it by copying. |
 | Linux desktop | `~/.local/bin/icloud-on-linux` and `~/.local/share/icloud-on-linux/` | User installation of the app and its helper; the desktop entry is under `~/.local/share/applications/`. |
 | Host | `.vm/` | Disk, identifier, installation media, keys, and administration data for the local VM. Excluded from Git and the Docker build context. |
 | Host | `downloads/` | Personal copies extracted from the container. Excluded from Git and the Docker build context. |
@@ -253,10 +314,15 @@ Dockerfile and the session script needed by the image to the builder.
   runs the upload queue with the real rclone against local fictional remotes:
   verification, Keep both and Skip, interrupted uploads and crashes, a WebDAV
   outage, a changed profile, and cloud edits before the copy or during verification.
+  [crates/core/tests/sync.rs](../crates/core/tests/sync.rs) runs real bisync between
+  a private local folder and a fictional `icloud:` folder: the first copy, local and
+  remote changes with Backups, a conflict, held mass deletions, a killed run, a
+  deleted iCloud folder, and lost sync history.
 - [crates/app/tests/visible](../crates/app/tests/visible): the visible window on a
-  Wayland or X11 display. It uploads files and decides a conflict with Keep both,
-  disconnects during an upload and resumes it after reconnecting, and ends the app
-  during an upload. Then, in a new window, it connects, opens the file manager,
+  Wayland or X11 display. It adds a synced folder, continues its review of mass
+  deletions, and stops syncing it; uploads files and decides a conflict with Keep
+  both; disconnects during an upload and resumes it after reconnecting; and ends the
+  app during an upload. Then, in a new window, it connects, opens the file manager,
   and disconnects.
 - [crates/core/tests/auth.rs](../crates/core/tests/auth.rs): native sign-in, 2FA,
   SMS, renewal identity, cancellation, and save failures through a local rclone

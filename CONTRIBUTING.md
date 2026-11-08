@@ -79,18 +79,23 @@ cargo clippy --all-targets
 cargo test
 ```
 
-Run the tests on Linux as well: process protection, mounts, and uploads depend on
-it. There, the upload queue runs the real rclone against local fictional remotes:
-verification by download, Keep both and Skip, interrupted and recovered uploads, a
-backend outage, a changed profile, cloud edits during an upload, and crashes.
+Run the tests on Linux as well: process protection, mounts, uploads, and synced
+folders depend on it. There, the upload queue runs the real rclone against local
+fictional remotes: verification by download, Keep both and Skip, interrupted and
+recovered uploads, a backend outage, a changed profile, cloud edits during an
+upload, and crashes. Synced folders run real bisync between a private local folder
+and a fictional `icloud:` folder: the first copy, automatic local changes, remote
+changes with Backups, a conflict, held mass deletions, a killed run, a deleted
+iCloud folder, and lost sync history.
 
 Keep `unsafe` code out of the crates except where a system call requires it, and
 explain each such block in a `SAFETY` comment.
 
 When `WAYLAND_DISPLAY` or `DISPLAY` is set, as in a desktop session, `cargo test`
-also runs the visible window check with a fictional encrypted profile. It uploads
-files and decides a conflict, disconnects during an upload and resumes it after
-reconnecting, and ends the app during an upload. Then, in a new window, it connects
+also runs the visible window check with a fictional encrypted profile. It syncs a
+folder, continues its review of mass deletions, and stops syncing it; uploads files
+and decides a conflict; disconnects during an upload and resumes it after
+reconnecting; and ends the app during an upload. Then, in a new window, it connects
 and disconnects. To also click Open and wait for the file manager, run:
 
 ```sh
@@ -123,11 +128,12 @@ as arguments. Containers receive only tracked sources, the packages, and those
 programs, never `.vm/` or `downloads/`. Each installs the package with rclone
 1.75.2 (the verified official package on Debian and Ubuntu) and runs as an
 unprivileged user with the installed helper: the Rust tests, including a real FUSE
-mount and the real rclone sign-in steps; the visible window under headless Weston,
-where Open must start a stand-in file manager; and the installed app, which must
-close on SIGTERM. Containers get `/dev/fuse` and `SYS_ADMIN` for the private
-mounts. Compiling the GTK bindings takes up to 2 GB of memory per job; with less,
-set `CARGO_BUILD_JOBS=1` before running both scripts.
+mount, real bisync for synced folders, and the real rclone sign-in steps; the
+visible window under headless Weston, where Open must start a stand-in file
+manager; and the installed app, which must close on SIGTERM. Containers get
+`/dev/fuse` and `SYS_ADMIN` for the private mounts. Compiling the GTK bindings
+takes up to 2 GB of memory per job; with less, set `CARGO_BUILD_JOBS=1` before
+running both scripts.
 
 To check the real GNOME and KDE Wayland compositors, run this in the dedicated VM
 as a separate test user that can read the checkout, with `gnome-shell`,

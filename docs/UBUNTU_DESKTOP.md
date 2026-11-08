@@ -118,11 +118,41 @@ Pending payloads and opened files are stored unencrypted in your private user
 cache. Keep enough free disk space and preserve that cache when recovering a
 pending upload. Configuration encryption protects the session, not file contents.
 
+## Edit files in synced folders
+
+The `~/iCloud` folder stays read-only. To create, edit, move, or delete files from
+Files or Dolphin, sync a folder:
+
+1. Connect inside the app, then select **Add folder** next to **Open iCloud Drive**
+   and choose a folder inside iCloud Drive. The whole drive cannot be synced.
+2. The app copies that folder to `~/iCloud Sync/<folder name>`. Wait for **Up to date**;
+   the first copy downloads every file, so check the free disk space.
+3. Work in that local folder as usual, even offline. While connected, local changes
+   sync within seconds and changes from other devices within two minutes. Select
+   **Sync now** in the folder's menu, opened with a right click, to sync at once.
+   Syncing pauses on disconnect and resumes on the next connection.
+
+If the same file changed here and elsewhere, both versions are kept: the newer
+one keeps the name, and the other ends with `.conflict1` before its extension.
+Delete or rename the version you do not want. Files you delete here go to
+Recently Deleted in iCloud. Local files that another device replaced or deleted are
+kept, by date, in the folder that **Backups** in the folder's menu opens.
+
+**Needs review** means nothing was synced: more than half the files were deleted or
+changed at once, a side is empty or missing, or the sync history is missing.
+Check the folder, then select **Review...** and **Continue** to apply the deletions
+or restore the folder by copying. Two names that differ only in letter case pause
+the folder until you rename one, because iCloud treats them as the same name.
+
+**Stop syncing**, in the folder's menu, keeps both the local copy and the iCloud
+folder. Moving or renaming a folder transfers its files again. Local copies are
+not encrypted.
+
 ## Desktop coverage
 
 | Desktop | Environment checked | Result |
 | --- | --- | --- |
-| GNOME 46 and Files | Ubuntu 24.04 ARM64, separate test user, headless GNOME Shell without X11 | Connect, state, an upload conflict decided with Keep both, pause on disconnect and resume, ending the app during an upload, Open with Files observed, and safe disconnect passed. |
+| GNOME 46 and Files | Ubuntu 24.04 ARM64, separate test user, headless GNOME Shell without X11 | Connect, state, a synced folder with a review of mass deletions and Stop syncing, an upload conflict decided with Keep both, pause on disconnect and resume, ending the app during an upload, Open with Files observed, and safe disconnect passed. |
 | KDE Plasma 5.27 KWin and Dolphin | Ubuntu 24.04 ARM64, separate test user, virtual KWin Wayland without X11 | The same controls passed, with Dolphin observed after Open. |
 | X11 | Ubuntu 24.04 ARM64, separate test user, Xvfb without a desktop shell | The same controls passed, except Open. |
 

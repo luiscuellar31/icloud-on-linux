@@ -21,11 +21,13 @@ using rclone to reach your account.
 - Connect and disconnect from a native desktop window, and sign in or renew the
   session there without a terminal.
 - Upload files with a visible queue, pause and resume, and conflict decisions.
+- Create, edit, move, and delete files from Files or Dolphin in synced folders,
+  with both versions kept on conflicts and mass deletions held for review.
 - List and download files from a terminal through the Docker environment.
 
-The file manager mount is read-only. Uploads use the app queue; select Skip or
-Keep both when a different cloud file already exists. Editing and synchronization
-are planned.
+The `~/iCloud` mount is read-only. To edit, sync a folder to `~/iCloud Sync`, or
+upload through the app queue and select Skip or Keep both when a different cloud
+file already exists.
 
 ## Try it
 
@@ -84,8 +86,7 @@ the [Docker guide](docs/DOCKER.md) for the commands and download steps.
 
 ## Roadmap
 
-- Upload, edit, move, and delete files from the file manager.
-- Keep folders in sync and handle conflicts and interrupted connections.
+- Edit files on demand in the mounted drive, without a full local copy.
 - Publish release packages and test full Fedora and Debian desktop sessions.
 
 ## Documentation and contributions
