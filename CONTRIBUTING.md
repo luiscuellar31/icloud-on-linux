@@ -85,8 +85,9 @@ fictional remotes: verification by download, Keep both and Skip, interrupted and
 recovered uploads, a backend outage, a changed profile, cloud edits during an
 upload, and crashes. Synced folders run real bisync between a private local folder
 and a fictional `icloud:` folder: the first copy, automatic local changes, remote
-changes with Backups, a conflict, held mass deletions, a killed run, a deleted
-iCloud folder, and lost sync history.
+changes with Backups, a conflict, held mass deletions, renames in a small folder
+that continue without review, a killed run, a deleted iCloud folder, and lost sync
+history.
 
 Keep `unsafe` code out of the crates except where a system call requires it, and
 explain each such block in a `SAFETY` comment.

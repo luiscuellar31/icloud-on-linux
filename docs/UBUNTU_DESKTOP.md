@@ -138,11 +138,17 @@ Delete or rename the version you do not want. Files you delete here go to
 Recently Deleted in iCloud. Local files that another device replaced or deleted are
 kept, by date, in the folder that **Backups** in the folder's menu opens.
 
-**Needs review** means nothing was synced: more than half the files were deleted or
-changed at once, a side is empty or missing, or the sync history is missing.
-Check the folder, then select **Review...** and **Continue** to apply the deletions
-or restore the folder by copying. Two names that differ only in letter case pause
-the folder until you rename one, because iCloud treats them as the same name.
+Renaming, deleting, or editing up to five items syncs without questions, even in a
+small folder. **Needs review** means nothing was synced and the status shows
+**Review needed**: more than five items were deleted or renamed and they are more
+than half of the folder, every item changed, a side is empty or missing, or the
+sync history is missing. The message says how many items changed and where. Check
+the folder, then select **Review...** and **Continue** to apply the changes or
+restore the folder by copying. Two names that differ only in letter case pause the
+folder until you rename one, because iCloud treats them as the same name.
+
+Adding a synced folder also adds **iCloud Sync** to the sidebar of Files and
+Dolphin, so the editable copies are one click away from the read-only mount.
 
 **Stop syncing**, in the folder's menu, keeps both the local copy and the iCloud
 folder. Moving or renaming a folder transfers its files again. Local copies are

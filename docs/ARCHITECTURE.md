@@ -32,6 +32,7 @@ and Fedora 45 containers.
 | [crates/core/src/uploads.rs](../crates/core/src/uploads.rs) | Own private upload snapshots, durable queue storage, path validation, and local cleanup. |
 | [crates/core/src/transfers.rs](../crates/core/src/transfers.rs) | Prepare files in a worker thread, run one rclone command at a time, verify cloud bytes, and pause or resolve conflicts. |
 | [crates/core/src/sync.rs](../crates/core/src/sync.rs) | Keep chosen iCloud folders and local copies in two-way sync with rclone bisync, and surface pending changes, conflicts, reviews, and backups. |
+| [crates/core/src/places.rs](../crates/core/src/places.rs) | Add an `iCloud Sync` place to the GTK bookmarks and existing Dolphin places, without duplicating or rewriting other entries. |
 | [crates/core](../crates/core) | Rust library for the native app without a user interface: paths, profile and mount checks, the upload queue, synced folders, translated text, change signals, and child processes that die with the app. |
 
 Provisioning assumes Ubuntu with GNOME, the `icloud` user, and a prepared medium
@@ -212,7 +213,12 @@ run's folder is named by its time in UTC.
 Results map to states the window shows:
 
 - bisync aborts without changes when more than half the files would be deleted or
-  all files changed. **Review...** then asks, and **Continue** allows one run with
+  every file changed. Renames count as deletions, so renaming or editing a few
+  files in a small folder also trips these ratios. When at most five items are
+  deleted, or every item changed in a folder of at most five, the app continues
+  once with `--force`: such changes stay recoverable from Recently Deleted and
+  Backups. Larger changes show the count and side, the status shows
+  **Review needed**, and **Review...** asks before **Continue** allows one run with
   `--force`.
 - An empty or missing side, or a missing or untrusted sync history, also stops
   without changes. **Continue** recreates the iCloud folder if needed and runs a
@@ -316,11 +322,13 @@ Dockerfile and the session script needed by the image to the builder.
   outage, a changed profile, and cloud edits before the copy or during verification.
   [crates/core/tests/sync.rs](../crates/core/tests/sync.rs) runs real bisync between
   a private local folder and a fictional `icloud:` folder: the first copy, local and
-  remote changes with Backups, a conflict, held mass deletions, a killed run, a
-  deleted iCloud folder, and lost sync history.
+  remote changes with Backups, a conflict, held mass deletions, renames in a small
+  folder that continue without review, a killed run, a deleted iCloud folder, and
+  lost sync history. [crates/core/src/places.rs](../crates/core/src/places.rs)
+  checks the sidebar places in temporary GTK and Dolphin settings.
 - [crates/app/tests/visible](../crates/app/tests/visible): the visible window on a
-  Wayland or X11 display. It adds a synced folder, continues its review of mass
-  deletions, and stops syncing it; uploads files and decides a conflict with Keep
+  Wayland or X11 display. It adds a synced folder with its sidebar place in
+  temporary settings, continues its review of mass deletions, and stops syncing it; uploads files and decides a conflict with Keep
   both; disconnects during an upload and resumes it after reconnecting; and ends the
   app during an upload. Then, in a new window, it connects, opens the file manager,
   and disconnects.
