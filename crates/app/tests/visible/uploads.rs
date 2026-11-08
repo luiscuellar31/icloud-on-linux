@@ -3,13 +3,13 @@
 //! uploads part, as its file dialog does, because the dialog cannot be driven from a check.
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::{env, fs};
 
 use adw::prelude::*;
 use icloud_core::session::{Session, State};
 use icloud_core::transfers::Transfers;
 use icloud_core::uploads::{State as Row, Upload, UploadStore};
+use icloud_on_linux::app::App;
 use icloud_on_linux::window::Window;
 
 use crate::support::Fixture;
@@ -63,12 +63,13 @@ fn paused(fixture: &Fixture, transfers: &Transfers, identifier: &str) {
     store.snapshots.verify(&item).unwrap();
 }
 
-pub fn check(window: &Window, session: &Rc<Session>, fixture: &Fixture) {
-    let transfers = window
-        .uploads
-        .transfers()
-        .expect("the upload queue could not be opened")
-        .clone();
+pub fn check(app: &App, fixture: &Fixture) {
+    let (window, session) = (&app.window(), &app.parts.session);
+    let transfers = app
+        .parts
+        .transfers
+        .clone()
+        .expect("the upload queue could not be opened");
     let section = ui::find(window, |_: &gtk::Expander| true).expect("the uploads section is not shown");
     section.set_expanded(true);
     let destination = |row: &adw::EntryRow| row.title().contains("Upload to");
@@ -158,8 +159,9 @@ pub fn check(window: &Window, session: &Rc<Session>, fixture: &Fixture) {
 
 /// Ending the app, as the desktop session does with SIGTERM, pauses an active upload before disconnecting and
 /// closes the window afterwards.
-pub fn check_shut_down(window: &Window, session: &Rc<Session>, fixture: &Fixture) {
-    let transfers = window.uploads.transfers().unwrap().clone();
+pub fn check_shut_down(app: &App, fixture: &Fixture) {
+    let (window, session) = (&app.window(), &app.parts.session);
+    let transfers = app.parts.transfers.clone().unwrap();
     let upload = start_slow_upload(window, session, &transfers, fixture.root.path().join("ending.bin"));
     // A destroyed window is hidden and released from the app; the check still holds a reference to it.
     let closed = || !window.window.is_visible() && window.window.application().is_none();

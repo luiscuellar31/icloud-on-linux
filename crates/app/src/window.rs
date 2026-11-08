@@ -1,6 +1,6 @@
 //! The main window: the connection status, the local key, opening iCloud Drive in the file manager, synced folders,
-//! and uploads.
-use std::cell::{Cell, RefCell};
+//! and uploads. It shows the app's parts, which keep running when a window in another language replaces it.
+use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
@@ -8,8 +8,9 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 use icloud_core::connection::Connection;
 use icloud_core::session::{Session, State};
-use icloud_core::tr;
+use icloud_core::{i18n, settings, tr};
 
+use crate::app::{App, Parts};
 use crate::folders::Folders;
 use crate::signin::SignIn;
 use crate::uploads::Uploads;
@@ -21,7 +22,9 @@ pub struct Window {
     pub window: adw::ApplicationWindow,
     pub folders: Rc<Folders>,
     pub uploads: Rc<Uploads>,
+    parts: Rc<Parts>,
     session: Rc<Session>,
+    app: Weak<App>,
     dot: gtk::Label,
     status: gtk::Label,
     detail: gtk::Label,
@@ -34,13 +37,10 @@ pub struct Window {
     open: gtk::Button,
     cancel: gtk::Button,
     renew: gio::SimpleAction,
+    language: gio::SimpleAction,
     disconnect: gio::SimpleAction,
     quit: gio::SimpleAction,
-    closing: Cell<bool>,
     sign_in: RefCell<Weak<SignIn>>,
-    /// Disconnect waits for uploads and sync to stop, because they use the unlocked connection.
-    disconnect_pending: Cell<bool>,
-    renew_pending: Cell<bool>,
 }
 
 /// Run `action` if the part still exists; closures keep only weak references so the window can be freed.
@@ -67,7 +67,8 @@ fn label(css: &[&str]) -> gtk::Label {
 }
 
 impl Window {
-    pub fn new(application: &adw::Application, session: Rc<Session>) -> Rc<Window> {
+    /// A window in the current language that shows `parts`; `app` replaces it when another language is chosen.
+    pub(crate) fn new(application: &adw::Application, parts: &Rc<Parts>, app: Weak<App>) -> Rc<Window> {
         let dot = gtk::Label::new(Some("\u{25cf}"));
         let status = label(&["heading"]);
         status.set_hexpand(true);
@@ -120,12 +121,12 @@ impl Window {
             .label(tr!("Cancel"))
             .css_classes(["pill"])
             .build();
-        let folders = Folders::new(&session);
+        let folders = Folders::new(parts);
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         actions.append(&open);
         actions.append(&folders.add);
         actions.append(&cancel);
-        let uploads = Uploads::new(&session);
+        let uploads = Uploads::new(parts);
 
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -150,11 +151,20 @@ impl Window {
 
         let menu = gio::Menu::new();
         let actions = gio::Menu::new();
-        if uploads.transfers().is_some() {
+        if parts.transfers.is_some() {
             actions.append(Some(&tr!("Upload files...")), Some("win.upload"));
         }
         actions.append(Some(&tr!("Renew Apple session...")), Some("win.renew"));
         menu.append_section(None, &actions);
+        // Each language is shown by its own name, so it can be found in any language.
+        let languages = gio::Menu::new();
+        languages.append(Some(&tr!("Automatic")), Some("win.language::auto"));
+        for (code, name) in i18n::LANGUAGES {
+            languages.append(Some(name), Some(&format!("win.language::{code}")));
+        }
+        let language = gio::Menu::new();
+        language.append_submenu(Some(&tr!("Language")), &languages);
+        menu.append_section(None, &language);
         let connection = gio::Menu::new();
         connection.append(Some(&tr!("Disconnect")), Some("win.disconnect"));
         connection.append(Some(&tr!("Quit")), Some("win.quit"));
@@ -182,6 +192,12 @@ impl Window {
             .build();
         let renew = gio::SimpleAction::new("renew", None);
         window.add_action(&renew);
+        let language = gio::SimpleAction::new_stateful(
+            "language",
+            Some(glib::VariantTy::STRING),
+            &parts.language.get().to_variant(),
+        );
+        window.add_action(&language);
         let disconnect = gio::SimpleAction::new("disconnect", None);
         let quit = gio::SimpleAction::new("quit", None);
         window.add_action(&disconnect);
@@ -192,7 +208,9 @@ impl Window {
             window,
             folders,
             uploads,
-            session,
+            parts: parts.clone(),
+            session: parts.session.clone(),
+            app,
             dot,
             status,
             detail,
@@ -205,12 +223,10 @@ impl Window {
             open,
             cancel,
             renew,
+            language,
             disconnect,
             quit,
-            closing: Cell::new(false),
             sign_in: RefCell::new(Weak::new()),
-            disconnect_pending: Cell::new(false),
-            renew_pending: Cell::new(false),
         });
         this.connect_signals();
         this.render();
@@ -218,10 +234,6 @@ impl Window {
     }
 
     fn connect_signals(self: &Rc<Self>) {
-        let weak = Rc::downgrade(self);
-        self.session
-            .changed()
-            .connect(move || with(&weak, |window| window.render()));
         let weak = Rc::downgrade(self);
         self.key.connect_changed(move |_| with(&weak, |window| window.render()));
         let weak = Rc::downgrade(self);
@@ -233,26 +245,19 @@ impl Window {
         let weak = Rc::downgrade(self);
         self.open
             .connect_clicked(move |_| with(&weak, |window| window.open_folder()));
-        if let Some(transfers) = self.uploads.transfers() {
-            let weak = Rc::downgrade(self);
-            transfers.changed.connect(move || with(&weak, |window| window.render()));
-            let weak = Rc::downgrade(self);
-            transfers
-                .idle
-                .connect(move || with(&weak, |window| window.parts_idle()));
-        }
-        if let Some(sync) = self.folders.synced() {
-            let weak = Rc::downgrade(self);
-            sync.changed.connect(move || with(&weak, |window| window.render()));
-            let weak = Rc::downgrade(self);
-            sync.idle.connect(move || with(&weak, |window| window.parts_idle()));
-        }
         let weak = Rc::downgrade(self);
         self.sign_in_button
             .connect_clicked(move |_| with(&weak, |window| window.sign_in()));
         let weak = Rc::downgrade(self);
         self.renew
             .connect_activate(move |_, _| with(&weak, |window| window.renew()));
+        let app = self.app.clone();
+        self.language.connect_change_state(move |_, state| {
+            let chosen = state.and_then(|state| state.str());
+            if let Some(choice) = settings::LANGUAGES.into_iter().find(|choice| Some(*choice) == chosen) {
+                with(&app, |app| app.choose_language(choice));
+            }
+        });
         let weak = Rc::downgrade(self);
         self.cancel
             .connect_clicked(move |_| with(&weak, |window| window.disconnect_session()));
@@ -270,9 +275,8 @@ impl Window {
         let weak = Rc::downgrade(self);
         glib::timeout_add_local(Duration::from_millis(200), move || match weak.upgrade() {
             Some(window) => {
-                window.session.tick();
                 // A cancelled sign-in ends outside the session, so closing checks on its own.
-                if window.closing.get() {
+                if window.parts.closing.get() {
                     window.render();
                 }
                 if window.progress.is_visible() {
@@ -282,17 +286,18 @@ impl Window {
             }
             None => glib::ControlFlow::Break,
         });
-        // The end of the desktop session disconnects without asking.
-        for signal in [nix::libc::SIGTERM, nix::libc::SIGINT] {
-            let weak = Rc::downgrade(self);
-            glib_unix::unix_signal_add_local(signal, move || {
-                with(&weak, |window| window.shut_down());
-                glib::ControlFlow::Continue
-            });
-        }
     }
 
-    fn render(&self) {
+    /// Keep the size and the uploads settings of `old`, the window this one replaces.
+    pub(crate) fn take_over(&self, old: &Window) {
+        let (width, height) = old.window.default_size();
+        self.window.set_default_size(width, height);
+        self.window.set_maximized(old.window.is_maximized());
+        self.uploads.take_over(&old.uploads);
+    }
+
+    pub(crate) fn render(&self) {
+        let parts = &self.parts;
         let mount = self.session.current_mount();
         let facts = Facts {
             state: self.session.state(),
@@ -304,10 +309,10 @@ impl Window {
             owns_mount: self.session.owns_mount(),
             key_typed: typed(&self.key),
             signed_in: std::fs::symlink_metadata(&self.session.paths().config).is_ok(),
-            renewing: self.renew_pending.get(),
+            renewing: parts.renew_pending.get(),
             uploads: self.uploads.status(),
             folders: self.folders.status(),
-            disconnect_pending: self.disconnect_pending.get(),
+            disconnect_pending: parts.disconnect_pending.get(),
         };
         let screen = view::screen(&facts);
         self.status.set_label(&screen.status);
@@ -326,22 +331,23 @@ impl Window {
         self.cancel.set_visible(screen.cancel);
         self.cancel.set_sensitive(screen.cancel_enabled);
         self.disconnect.set_enabled(screen.disconnect);
-        self.folders
-            .render(self.disconnect_pending.get(), screen.open_visible, facts.signed_in);
-        self.uploads.render(self.disconnect_pending.get());
+        self.folders.render(screen.open_visible, facts.signed_in);
+        self.uploads.render();
         self.renew.set_enabled(screen.renew);
-        if self.renew_pending.get() {
+        // A window that is closing is not replaced.
+        self.language.set_enabled(!parts.closing.get());
+        if parts.renew_pending.get() {
             if self.session.state() == State::Error {
-                self.renew_pending.set(false);
+                parts.renew_pending.set(false);
             } else if screen.key_panel || screen.welcome {
-                self.renew_pending.set(false);
+                parts.renew_pending.set(false);
                 self.sign_in();
             }
         }
-        if self.closing.get() && !self.session.busy() && !self.disconnect_pending.get() && !self.signing_in() {
+        if parts.closing.get() && !self.session.busy() && !parts.disconnect_pending.get() && !self.signing_in() {
             if self.session.running() || mount.is_some() {
                 // Disconnecting failed, for example because a file is open; the status explains it.
-                self.closing.set(false);
+                parts.closing.set(false);
             } else {
                 self.window.destroy();
             }
@@ -379,7 +385,7 @@ impl Window {
         dialog.choose(Some(&self.window), gio::Cancellable::NONE, move |response| {
             if response == "renew" {
                 with(&weak, |window| {
-                    window.renew_pending.set(true);
+                    window.parts.renew_pending.set(true);
                     window.disconnect_session();
                     window.render();
                 });
@@ -419,34 +425,19 @@ impl Window {
 
     /// Pause uploads and sync, then disconnect once they have stopped.
     fn disconnect_session(&self) {
-        self.disconnect_pending.set(true);
-        self.uploads.pause();
-        self.folders.pause();
-        self.parts_idle();
+        self.parts.disconnect();
         self.render();
     }
 
-    /// Uploads and sync both use the unlocked connection, so it closes only after both stop.
-    fn parts_idle(&self) {
-        if self.disconnect_pending.get() && !self.uploads.busy() && !self.folders.busy() {
-            self.disconnect_pending.set(false);
-            self.session.stop();
-        }
-    }
-
     fn active(&self) -> bool {
-        self.signing_in()
-            || self.session.running()
-            || self.session.owns_mount()
-            || self.uploads.busy()
-            || self.folders.busy()
+        self.signing_in() || self.session.running() || self.session.owns_mount() || self.parts.busy()
     }
 
     fn close_request(self: &Rc<Self>) -> glib::Propagation {
         if !self.active() {
             return glib::Propagation::Proceed;
         }
-        if !self.closing.get() {
+        if !self.parts.closing.get() {
             let dialog = adw::AlertDialog::builder()
                 .heading(tr!("Close iCloud on Linux"))
                 .body(tr!("Disconnect from iCloud Drive and close the app?"))
@@ -466,13 +457,13 @@ impl Window {
     }
 
     /// Pause uploads and sync and disconnect if needed, then close; `render` finishes once everything has stopped.
-    fn shut_down(&self) {
+    pub(crate) fn shut_down(&self) {
         let dialog = self.sign_in.borrow().upgrade();
         if let Some(dialog) = dialog {
             dialog.close();
         }
         if self.active() {
-            self.closing.set(true);
+            self.parts.closing.set(true);
             self.disconnect_session();
         } else {
             self.window.destroy();

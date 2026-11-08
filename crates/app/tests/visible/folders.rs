@@ -6,6 +6,7 @@ use std::fs;
 use adw::prelude::*;
 use icloud_core::places::Places;
 use icloud_core::sync::{Review, State as FolderState};
+use icloud_on_linux::app::App;
 use icloud_on_linux::window::Window;
 
 use crate::support::Fixture;
@@ -20,12 +21,13 @@ fn answer(window: &Window, label: &str) {
     button(window, label).emit_clicked();
 }
 
-pub fn check(window: &Window, fixture: &Fixture) {
-    let sync = window
-        .folders
-        .synced()
-        .expect("the synced folder list could not be opened")
-        .clone();
+pub fn check(app: &App, fixture: &Fixture) {
+    let window = &app.window();
+    let sync = app
+        .parts
+        .sync
+        .clone()
+        .expect("the synced folder list could not be opened");
     let remote = fixture.source.join("Docs");
     fs::create_dir(&remote).unwrap();
     for index in 0..8 {
@@ -40,7 +42,7 @@ pub fn check(window: &Window, fixture: &Fixture) {
         gtk: fixture.root.path().join("config-home/gtk-3.0/bookmarks"),
         kde: fixture.root.path().join("data-home/user-places.xbel"),
     };
-    window.folders.use_places(places.clone());
+    app.parts.places.replace(places.clone());
     window.folders.add_chosen(&fixture.paths.mount.join("Docs"));
     let added = sync.folders();
     assert_eq!(added.len(), 1, "{}", sync.message());

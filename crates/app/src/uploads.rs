@@ -1,19 +1,17 @@
 //! The uploads section: the cloud folder for new files, the queue with its decisions, and the file dialog.
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
 
 use adw::prelude::*;
-use gtk::{gio, glib};
+use gtk::gio;
 use icloud_core::connection::Connection;
-use icloud_core::session::Session;
 use icloud_core::tr;
-use icloud_core::transfers::Transfers;
 use icloud_core::uploads::Upload;
 
+use crate::app::Parts;
 use crate::view::{self, Queue};
 use crate::window::with;
 
@@ -56,8 +54,7 @@ impl Row {
 }
 
 pub struct Uploads {
-    transfers: Option<Rc<Transfers>>,
-    session: Rc<Session>,
+    parts: Rc<Parts>,
     root: gtk::Box,
     expander: gtk::Expander,
     destination: adw::EntryRow,
@@ -73,7 +70,6 @@ pub struct Uploads {
     /// The window's 'Upload files...' action.
     pub action: gio::SimpleAction,
     alerts: RefCell<BTreeSet<String>>,
-    disconnect_pending: Cell<bool>,
 }
 
 fn button(label: String) -> gtk::Button {
@@ -81,9 +77,8 @@ fn button(label: String) -> gtk::Button {
 }
 
 impl Uploads {
-    /// Open the saved queue; when it cannot be opened, the section only shows a warning.
-    pub fn new(session: &Rc<Session>) -> Rc<Uploads> {
-        let transfers = Transfers::new(session.clone()).ok();
+    /// The section for the app's queue; when the queue could not be opened, it only shows a warning.
+    pub fn new(parts: &Rc<Parts>) -> Rc<Uploads> {
         let warning = gtk::Label::builder()
             .label(tr!(
                 "The saved upload queue could not be opened. Your pending files were preserved."
@@ -91,7 +86,7 @@ impl Uploads {
             .wrap(true)
             .xalign(0.0)
             .css_classes(["error"])
-            .visible(transfers.is_none())
+            .visible(parts.transfers.is_none())
             .build();
 
         // Qt marks the access key with `&` and GTK with `_`; the text stays the one the translations know.
@@ -159,8 +154,7 @@ impl Uploads {
         root.append(&expander);
 
         let this = Rc::new(Uploads {
-            transfers,
-            session: session.clone(),
+            parts: parts.clone(),
             root,
             expander,
             destination,
@@ -175,24 +169,15 @@ impl Uploads {
             keep,
             action: gio::SimpleAction::new("upload", None),
             alerts: RefCell::default(),
-            disconnect_pending: Cell::new(false),
         });
         this.connect_signals();
         this
     }
 
     fn connect_signals(self: &Rc<Self>) {
-        let Some(transfers) = self.transfers.clone() else {
+        let Some(transfers) = self.parts.transfers.clone() else {
             return;
         };
-        let weak = Rc::downgrade(&transfers);
-        glib::timeout_add_local(Duration::from_millis(100), move || match weak.upgrade() {
-            Some(transfers) => {
-                transfers.tick();
-                glib::ControlFlow::Continue
-            }
-            None => glib::ControlFlow::Break,
-        });
         let weak = Rc::downgrade(self);
         self.add
             .connect_clicked(move |_| with(&weak, |uploads| uploads.choose()));
@@ -224,33 +209,17 @@ impl Uploads {
         &self.root
     }
 
-    /// The queue, unless it could not be opened.
-    pub fn transfers(&self) -> Option<&Rc<Transfers>> {
-        self.transfers.as_ref()
-    }
-
-    /// Whether a command or preparation runs; a disconnect waits until it ends.
-    pub fn busy(&self) -> bool {
-        self.transfers.as_ref().is_some_and(|transfers| transfers.busy())
-    }
-
-    pub fn pause(&self) {
-        if let Some(transfers) = &self.transfers {
-            transfers.pause();
-        }
-    }
-
     pub fn status(&self) -> view::Uploads {
-        self.transfers.as_ref().map_or(view::Uploads::Idle, |transfers| {
+        self.parts.transfers.as_ref().map_or(view::Uploads::Idle, |transfers| {
             view::upload_status(&transfers.items(), transfers.storage_error(), transfers.busy())
         })
     }
 
     /// Queue `paths` for the folder in 'Upload to', as the file dialog does.
     pub fn add(&self, paths: Vec<PathBuf>) {
-        if let Some(transfers) = &self.transfers
+        if let Some(transfers) = &self.parts.transfers
             && !paths.is_empty()
-            && !self.disconnect_pending.get()
+            && !self.parts.disconnect_pending.get()
         {
             transfers.add(&paths, &self.destination.text());
         }
@@ -284,20 +253,26 @@ impl Uploads {
     }
 
     fn resolve(&self, keep_both: bool) {
-        if let (Some(transfers), Some(identifier)) = (&self.transfers, self.selected()) {
+        if let (Some(transfers), Some(identifier)) = (&self.parts.transfers, self.selected()) {
             transfers.resolve(&identifier, keep_both);
         }
     }
 
+    /// Keep what the user set in `old`, the section of the window this one replaces.
+    pub fn take_over(&self, old: &Uploads) {
+        self.destination.set_text(&old.destination.text());
+        self.expander.set_expanded(old.expander.is_expanded());
+        *self.alerts.borrow_mut() = old.alerts.borrow().clone();
+    }
+
     /// Show the queue. While a disconnect waits for it, no new work starts.
-    pub fn render(&self, disconnect_pending: bool) {
-        self.disconnect_pending.set(disconnect_pending);
-        let Some(transfers) = &self.transfers else {
+    pub fn render(&self) {
+        let Some(transfers) = &self.parts.transfers else {
             self.action.set_enabled(false);
             return;
         };
         let items = transfers.items();
-        let signed_in = fs::symlink_metadata(&self.session.paths().config).is_ok();
+        let signed_in = fs::symlink_metadata(&self.parts.session.paths().config).is_ok();
         self.expander.set_visible(signed_in || !items.is_empty());
         self.expander.set_label(Some(&view::uploads_title(&items)));
         self.show_rows(&items);
@@ -348,17 +323,17 @@ impl Uploads {
     }
 
     fn render_controls(&self) {
-        let Some(transfers) = &self.transfers else {
+        let Some(transfers) = &self.parts.transfers else {
             return;
         };
         let items = transfers.items();
         let selected = self.selected();
-        let profile = self.session.profile_id();
+        let profile = self.parts.session.profile_id();
         let controls = view::upload_controls(&Queue {
             items: &items,
             selected: selected.as_deref(),
             profile: &profile,
-            unlocked: self.session.unlocked() && !self.disconnect_pending.get(),
+            unlocked: self.parts.session.unlocked() && !self.parts.disconnect_pending.get(),
             accepts_files: transfers.can_add(),
             busy: transfers.busy(),
             storage_error: transfers.storage_error(),

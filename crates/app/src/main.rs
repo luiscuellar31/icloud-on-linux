@@ -7,9 +7,11 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
+use icloud_core::i18n;
 use icloud_core::paths::Paths;
 use icloud_core::session::Session;
-use icloud_on_linux::window;
+use icloud_core::settings::Settings;
+use icloud_on_linux::app::App;
 
 const APP_ID: &str = "io.github.luiscuellar31.IcloudOnLinux";
 
@@ -27,50 +29,54 @@ fn helper() -> PathBuf {
     installed
 }
 
-/// Draw this small window in software unless the user chose a renderer. Skipping OpenGL avoids loading the
-/// graphics driver, which costs 60 MB or more without GPU acceleration, as in virtual machines.
+/// Set what GTK reads from the environment as it starts: drawing in software unless the user chose a renderer, and
+/// `language` for GTK's own text when the user chose one in the app.
 #[allow(unsafe_code)]
-fn prefer_software_rendering() {
-    if env::var_os("GSK_RENDERER").is_some() {
-        return;
-    }
+fn prepare_gtk(language: Option<&str>) {
+    // Skipping OpenGL avoids loading the graphics driver, which costs 60 MB or more without GPU acceleration, as in
+    // virtual machines.
+    let software = env::var_os("GSK_RENDERER").is_none();
     // GTK 4.16 renamed the switch that keeps GDK from opening OpenGL and Vulkan at startup.
     let (name, value) = if gtk::minor_version() >= 16 {
         ("GDK_DISABLE", "gl,vulkan")
     } else {
         ("GDK_DEBUG", "gl-disable")
     };
-    // SAFETY: this runs first in main, before any thread exists, so nothing reads the environment meanwhile.
+    // SAFETY: main calls this before GTK starts and before any thread exists, so nothing reads the environment
+    // meanwhile.
     unsafe {
-        env::set_var("GSK_RENDERER", "cairo");
-        if env::var_os(name).is_none() {
-            env::set_var(name, value);
+        if software {
+            env::set_var("GSK_RENDERER", "cairo");
+            if env::var_os(name).is_none() {
+                env::set_var(name, value);
+            }
+        }
+        if let Some(language) = language {
+            env::set_var("LANGUAGE", language);
         }
     }
 }
 
 fn main() -> glib::ExitCode {
-    prefer_software_rendering();
     if !cfg!(target_os = "linux") || nix::unistd::getuid().is_root() {
         eprintln!("Open this app as your Linux desktop user.");
         return glib::ExitCode::FAILURE;
     }
     nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_truncate(0o077));
-    icloud_core::i18n::apply("auto");
+    let paths = Paths::for_user(helper());
+    let choice = Settings::new(paths.settings()).language();
+    // Automatic follows the desktop's languages, which are read here, before LANGUAGE changes for GTK.
+    let language = i18n::apply(choice);
+    prepare_gtk((choice != "auto").then_some(language));
     let application = adw::Application::builder().application_id(APP_ID).build();
     // GApplication keeps one copy running; opening the app again shows its window.
-    let shown: Rc<RefCell<Option<Rc<window::Window>>>> = Rc::default();
+    let shown: Rc<RefCell<Option<Rc<App>>>> = Rc::default();
     application.connect_activate(move |application| {
-        if let Some(window) = shown.borrow().as_ref() {
-            window.window.present();
+        if let Some(app) = shown.borrow().as_ref() {
+            app.present();
             return;
         }
-        let window = window::Window::new(application, Session::new(Paths::for_user(helper())));
-        // Quitting with the window keeps a late activation from showing a window that was already destroyed.
-        let running = application.clone();
-        window.window.connect_destroy(move |_| running.quit());
-        window.window.present();
-        *shown.borrow_mut() = Some(window);
+        *shown.borrow_mut() = Some(App::new(application, Session::new(paths.clone())));
     });
     application.run()
 }

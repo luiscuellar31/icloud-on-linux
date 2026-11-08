@@ -12,6 +12,9 @@ pub const LANGUAGES: [(&str, &str); 2] = [("en", "English"), ("es", "Español")]
 
 static SHOW_SPANISH: AtomicBool = AtomicBool::new(false);
 static CATALOG: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| SPANISH.iter().copied().collect());
+/// The desktop's languages, read at the first `apply`, so that the `LANGUAGE` the app then sets for GTK's own text
+/// does not change what Automatic means.
+static DESKTOP: LazyLock<Vec<String>> = LazyLock::new(desktop_languages);
 
 /// Return the text for the current language.
 pub fn tr(text: &str) -> String {
@@ -58,7 +61,7 @@ pub fn resolve(choice: &str, desktop: &[String]) -> &'static str {
 
 /// Show later text in the language for `choice`, and return that language.
 pub fn apply(choice: &str) -> &'static str {
-    let language = resolve(choice, &desktop_languages());
+    let language = resolve(choice, &DESKTOP);
     SHOW_SPANISH.store(language == "es", Ordering::Relaxed);
     language
 }

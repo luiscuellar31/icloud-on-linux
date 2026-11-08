@@ -1,7 +1,8 @@
-//! The visible window with the fictional profile: connect with the local key, sync a folder and continue its review,
-//! upload files and decide a conflict, disconnect during an upload and resume it, and end the app during an upload;
-//! then, in a new window, connect, open the file manager, and disconnect. It runs only when `WAYLAND_DISPLAY` or
-//! `DISPLAY` is set; Open is clicked only with `--expect-file-manager NAME`, which then waits for that process to start.
+//! The visible window with the fictional profile: connect with the local key, choose another language while
+//! connected, sync a folder and continue its review, upload files and decide a conflict, disconnect during an upload
+//! and resume it, and end the app during an upload; then, in a new window, connect, open the file manager, and
+//! disconnect. It runs only when `WAYLAND_DISPLAY` or `DISPLAY` is set; Open is clicked only with
+//! `--expect-file-manager NAME`, which then waits for that process to start.
 mod folders;
 #[path = "../../../core/tests/support/mod.rs"]
 mod support;
@@ -17,7 +18,7 @@ use std::{env, fs};
 use adw::prelude::*;
 use gtk::gio;
 use icloud_core::session::{Session, State};
-use icloud_on_linux::window::Window;
+use icloud_on_linux::app::App;
 
 use ui::{button, shows, wait};
 
@@ -88,15 +89,17 @@ fn main() {
     // uploads, and ending the app come first and Open is checked last, in a new window that closes the file manager
     // first.
     {
-        let (session, window) = show_window(&application, &fixture);
-        ui::connect(&window, &session);
-        folders::check(&window, &fixture);
-        uploads::check(&window, &session, &fixture);
-        uploads::check_shut_down(&window, &session, &fixture);
+        let app = show_app(&application, &fixture);
+        ui::connect(&app.window(), &app.parts.session);
+        check_language(&app, &fixture);
+        folders::check(&app, &fixture);
+        uploads::check(&app, &fixture);
+        uploads::check_shut_down(&app, &fixture);
     }
 
-    let (session, window) = show_window(&application, &fixture);
-    ui::connect(&window, &session);
+    let app = show_app(&application, &fixture);
+    let (session, window) = (&app.parts.session, app.window());
+    ui::connect(&window, session);
     let open = button(&window, "Open iCloud Drive");
     assert!(open.is_sensitive());
     if let Some(name) = &file_manager {
@@ -123,11 +126,47 @@ fn main() {
     println!("PASS: the visible window connected with the local key, showed the connection, and disconnected.");
 }
 
-/// A new session and window for the fixture, shown on screen.
-fn show_window(application: &adw::Application, fixture: &support::Fixture) -> (Rc<Session>, Rc<Window>) {
-    let session = Session::new(fixture.paths.clone());
-    let window = Window::new(application, session.clone());
-    window.window.present();
-    wait(30, "the window is shown", || window.window.is_mapped());
-    (session, window)
+/// The app with a new session for the fixture, its window shown on screen.
+fn show_app(application: &adw::Application, fixture: &support::Fixture) -> Rc<App> {
+    let app = App::new(application, Session::new(fixture.paths.clone()));
+    wait(30, "the window is shown", || app.window().window.is_mapped());
+    app
+}
+
+/// Choose Spanish and then English again while connected. Each choice is saved and shows a new window in that
+/// language, which keeps the folder for uploads, while the connection stays up.
+fn check_language(app: &App, fixture: &support::Fixture) {
+    let session = &app.parts.session;
+    let window = app.window();
+    ui::find(&window, |_: &gtk::Expander| true)
+        .expect("the uploads section is not shown")
+        .set_expanded(true);
+    let destination = |row: &adw::EntryRow| row.title().contains("Upload to");
+    wait(10, "the uploads section opens", || {
+        ui::find(&window, destination).is_some()
+    });
+    ui::find(&window, destination).unwrap().set_text("Kept uploads");
+    for (choice, connected) in [("es", "Conectado"), ("en", "Connected")] {
+        let old = app.window();
+        let language = old.window.lookup_action("language").unwrap();
+        language.activate(Some(&choice.to_variant()));
+        wait(10, "the window is replaced", || {
+            !Rc::ptr_eq(&app.window(), &old) && old.window.application().is_none()
+        });
+        let window = app.window();
+        wait(30, "the new window is shown", || window.window.is_mapped());
+        assert!(shows(&window, connected), "the window does not say {connected}");
+        assert!(
+            ui::find(&window, |row: &adw::EntryRow| row.text() == "Kept uploads").is_some(),
+            "the new window lost the folder for uploads"
+        );
+        assert_eq!(session.state(), State::Available, "{}", session.message());
+        assert!(session.current_mount().is_some());
+        let saved = fs::read_to_string(fixture.paths.settings()).unwrap();
+        assert!(
+            saved.lines().any(|line| line == format!("language={choice}")),
+            "{saved}"
+        );
+    }
+    println!("PASS: choosing a language showed the window in it, kept the connection, and saved the choice.");
 }

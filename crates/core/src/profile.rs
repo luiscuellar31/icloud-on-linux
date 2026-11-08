@@ -1,6 +1,6 @@
 //! The encrypted rclone profile, private folders, and the kernel's view of mounts.
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -79,7 +79,7 @@ pub fn private_directory(path: &Path) -> Result<()> {
     if !info.is_dir() || info.uid() != nix::unistd::getuid().as_raw() {
         return Err(Failure::Invalid(tr!("A private application folder is unavailable.")));
     }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    fs::set_permissions(path, Permissions::from_mode(0o700))?;
     Ok(())
 }
 
@@ -122,9 +122,14 @@ pub fn random_hex() -> std::io::Result<String> {
     Ok(hex(&bytes))
 }
 
-/// Replace `path` with `value` as JSON, atomically and durably: write a private temporary file beside it, flush it,
-/// rename it over `path`, and flush the folder. A failure leaves the previous file and no temporary one.
+/// Replace `path` with `value` as JSON in a private file, atomically and durably.
 pub fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
+    replace(path, &serde_json::to_vec(value)?, 0o600)
+}
+
+/// Replace `path` with `bytes`, atomically and durably: write a temporary file with permissions `mode` beside it,
+/// flush it, rename it over `path`, and flush the folder. A failure leaves the previous file and no temporary one.
+pub(crate) fn replace(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
     let mut name = path.file_name().unwrap_or_default().to_owned();
     name.push(format!("-{}", random_hex()?));
     let temporary = path.with_file_name(name);
@@ -134,7 +139,9 @@ pub fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
             .create_new(true)
             .mode(0o600)
             .open(&temporary)?;
-        file.write_all(&serde_json::to_vec(value)?)?;
+        // Set explicitly, so the app's private umask never narrows a desktop file that others may read.
+        file.set_permissions(Permissions::from_mode(mode))?;
+        file.write_all(bytes)?;
         file.sync_all()?;
         fs::rename(&temporary, path)?;
         flush_directory(

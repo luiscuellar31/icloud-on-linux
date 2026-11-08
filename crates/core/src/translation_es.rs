@@ -32,6 +32,8 @@ pub static SPANISH: &[(&str, &str)] = &[
         "Renewing disconnects iCloud Drive and pauses syncing until you connect again. Continue?",
         "Para renovar la sesión se desconecta iCloud Drive y la sincronización queda en pausa hasta que vuelvas a conectarte. ¿Continuar?",
     ),
+    ("Language", "Idioma"),
+    ("Automatic", "Automático"),
     ("Disconnect", "Desconectar"),
     ("Quit", "Salir"),
     (

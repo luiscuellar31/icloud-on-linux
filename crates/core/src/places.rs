@@ -1,7 +1,7 @@
 //! Sidebar places in GTK file managers and Dolphin, for the editable copies of synced folders.
 use std::env;
-use std::fs::{self, Permissions};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 
 use crate::paths::home;
+use crate::profile;
 
 const ICON: &str = "  <info>\n   <metadata owner=\"http://freedesktop.org\">\n    <bookmark:icon name=\"folder-cloud\"/>\n   \
                     </metadata>\n  </info>\n";
@@ -124,20 +125,13 @@ fn read(path: &Path) -> io::Result<String> {
 /// Replace a desktop settings file atomically, keeping its permissions.
 fn replace(path: &Path, text: &str) -> io::Result<()> {
     let mode = fs::metadata(path).map_or(0o600, |info| info.permissions().mode() & 0o777);
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let mut file = tempfile::Builder::new()
-        .prefix(&format!(".{name}."))
-        .permissions(Permissions::from_mode(mode))
-        .tempfile_in(path.parent().unwrap_or(Path::new("/")))?;
-    file.write_all(text.as_bytes())?;
-    file.as_file().sync_all()?;
-    file.persist(path)?;
-    Ok(())
+    profile::replace(path, text.as_bytes(), mode)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::Permissions;
 
     const KDE: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE xbel>\n\
                        <xbel xmlns:bookmark=\"http://www.freedesktop.org/standards/desktop-bookmarks\">\n \

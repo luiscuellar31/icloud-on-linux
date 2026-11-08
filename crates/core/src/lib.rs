@@ -10,6 +10,7 @@ pub mod places;
 pub mod process;
 pub mod profile;
 pub mod session;
+pub mod settings;
 pub mod signal;
 pub mod sync;
 pub mod transfers;

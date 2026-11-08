@@ -1,18 +1,16 @@
 //! The synced folders section: iCloud Drive folders with local copies to edit in Files or Dolphin, their states, and
 //! the reviews they need, with Add folder beside Open.
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
-use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use icloud_core::connection::Connection;
-use icloud_core::places::Places;
-use icloud_core::session::Session;
-use icloud_core::sync::{State as FolderState, SyncFolder, SyncedFolders};
+use icloud_core::sync::{State as FolderState, SyncFolder};
 use icloud_core::tr;
 
+use crate::app::Parts;
 use crate::view::{self, FolderList};
 use crate::window::with;
 
@@ -55,8 +53,7 @@ impl Row {
 }
 
 pub struct Folders {
-    sync: Option<Rc<SyncedFolders>>,
-    session: Rc<Session>,
+    parts: Rc<Parts>,
     root: gtk::Box,
     section: gtk::Box,
     /// 'Add folder', which the window shows beside Open.
@@ -70,15 +67,11 @@ pub struct Folders {
     sync_now: gio::SimpleAction,
     backups: gio::SimpleAction,
     stop: gio::SimpleAction,
-    /// Where Add folder puts the iCloud Sync place.
-    places: RefCell<Places>,
-    disconnect_pending: Cell<bool>,
 }
 
 impl Folders {
-    /// Open the saved folder list; when it cannot be opened, the section only shows a warning.
-    pub fn new(session: &Rc<Session>) -> Rc<Folders> {
-        let sync = SyncedFolders::new(session.clone()).ok();
+    /// The section for the app's synced folders; when their list could not be opened, it only shows a warning.
+    pub fn new(parts: &Rc<Parts>) -> Rc<Folders> {
         let warning = gtk::Label::builder()
             .label(tr!(
                 "The synced folder list could not be opened. Synced folders were left unchanged."
@@ -86,7 +79,7 @@ impl Folders {
             .wrap(true)
             .xalign(0.0)
             .css_classes(["error"])
-            .visible(sync.is_none())
+            .visible(parts.sync.is_none())
             .build();
         let heading = gtk::Label::builder()
             .label(tr!("Folders on this computer"))
@@ -147,8 +140,7 @@ impl Folders {
             .build();
 
         let this = Rc::new(Folders {
-            sync,
-            session: session.clone(),
+            parts: parts.clone(),
             root,
             section,
             add,
@@ -161,26 +153,15 @@ impl Folders {
             sync_now,
             backups,
             stop,
-            places: RefCell::new(Places::for_user()),
-            disconnect_pending: Cell::new(false),
         });
         this.connect_signals();
         this
     }
 
     fn connect_signals(self: &Rc<Self>) {
-        let Some(sync) = self.sync.clone() else {
+        if self.parts.sync.is_none() {
             return;
-        };
-        // Sync ticks for as long as the app runs, also while disconnected, to keep the folder states current.
-        let weak = Rc::downgrade(&sync);
-        glib::timeout_add_local(Duration::from_secs(1), move || match weak.upgrade() {
-            Some(sync) => {
-                sync.tick();
-                glib::ControlFlow::Continue
-            }
-            None => glib::ControlFlow::Break,
-        });
+        }
         let weak = Rc::downgrade(self);
         self.add
             .connect_clicked(move |_| with(&weak, |folders| folders.choose()));
@@ -222,7 +203,7 @@ impl Folders {
         let weak = Rc::downgrade(self);
         self.sync_now.connect_activate(move |_, _| {
             with(&weak, |folders| {
-                if let (Some(sync), Some(identifier)) = (&folders.sync, folders.selected()) {
+                if let (Some(sync), Some(identifier)) = (&folders.parts.sync, folders.selected()) {
                     sync.sync_now(Some(&identifier));
                 }
             })
@@ -230,7 +211,7 @@ impl Folders {
         let weak = Rc::downgrade(self);
         self.backups.connect_activate(move |_, _| {
             with(&weak, |folders| {
-                if let (Some(sync), Some(identifier)) = (&folders.sync, folders.selected()) {
+                if let (Some(sync), Some(identifier)) = (&folders.parts.sync, folders.selected()) {
                     folders.open_path(&sync.backups(&identifier));
                 }
             })
@@ -244,43 +225,23 @@ impl Folders {
         &self.root
     }
 
-    /// The synced folders, unless their list could not be opened.
-    pub fn synced(&self) -> Option<&Rc<SyncedFolders>> {
-        self.sync.as_ref()
-    }
-
-    /// Whether bisync runs; a disconnect waits until it ends.
-    pub fn busy(&self) -> bool {
-        self.sync.as_ref().is_some_and(|sync| sync.busy())
-    }
-
-    pub fn pause(&self) {
-        if let Some(sync) = &self.sync {
-            sync.pause();
-        }
-    }
-
     pub fn status(&self) -> view::Folders {
-        self.sync
+        self.parts
+            .sync
             .as_ref()
             .map_or(view::Folders::None, |sync| view::folder_status(&sync.folders()))
     }
 
     /// Sync the iCloud Drive folder chosen in the mount, as the folder dialog does.
     pub fn add_chosen(&self, chosen: &Path) {
-        let Some(sync) = &self.sync else {
+        let Some(sync) = &self.parts.sync else {
             return;
         };
-        if sync.add(&view::chosen_folder(&self.session.paths().mount, chosen)) {
+        if sync.add(&view::chosen_folder(&self.parts.session.paths().mount, chosen)) {
             // The editable copies live outside the read-only mount, so Files and Dolphin get a direct place. It is
             // a convenience: syncing works without it.
-            let _ = self.places.borrow().add(sync.local_root(), "iCloud Sync");
+            let _ = self.parts.places.borrow().add(sync.local_root(), "iCloud Sync");
         }
-    }
-
-    /// Keep sidebar places in other settings files, as checks do to leave the desktop's own unchanged.
-    pub fn use_places(&self, places: Places) {
-        *self.places.borrow_mut() = places;
     }
 
     fn parent(&self) -> Option<gtk::Window> {
@@ -291,7 +252,7 @@ impl Folders {
         if !self.add.is_sensitive() {
             return;
         }
-        let mount = gio::File::for_path(&self.session.paths().mount);
+        let mount = gio::File::for_path(&self.parts.session.paths().mount);
         let dialog = gtk::FileDialog::builder()
             .title(tr!("Choose an iCloud Drive folder to sync"))
             .initial_folder(&mount)
@@ -314,7 +275,7 @@ impl Folders {
     fn open_selected(&self) {
         let folder = self
             .selected()
-            .and_then(|identifier| self.sync.as_ref()?.folder(&identifier));
+            .and_then(|identifier| self.parts.sync.as_ref()?.folder(&identifier));
         if let Some(folder) = folder {
             self.open_path(&folder.local);
         }
@@ -339,7 +300,7 @@ impl Folders {
     }
 
     fn confirm_review(self: &Rc<Self>) {
-        let Some(sync) = self.sync.clone() else {
+        let Some(sync) = self.parts.sync.clone() else {
             return;
         };
         let review = self
@@ -368,7 +329,7 @@ impl Folders {
     }
 
     fn confirm_stop(self: &Rc<Self>) {
-        let (Some(sync), Some(identifier)) = (self.sync.clone(), self.selected()) else {
+        let (Some(sync), Some(identifier)) = (self.parts.sync.clone(), self.selected()) else {
             return;
         };
         let Some(folder) = sync.folder(&identifier) else {
@@ -394,9 +355,8 @@ impl Folders {
     }
 
     /// Show the folders. Add folder appears while connected; while a disconnect waits for sync, nothing new starts.
-    pub fn render(&self, disconnect_pending: bool, available: bool, signed_in: bool) {
-        self.disconnect_pending.set(disconnect_pending);
-        let Some(sync) = &self.sync else {
+    pub fn render(&self, available: bool, signed_in: bool) {
+        let Some(sync) = &self.parts.sync else {
             return;
         };
         let folders = sync.folders();
@@ -438,7 +398,7 @@ impl Folders {
     }
 
     fn controls(&self) -> Option<view::FolderControls> {
-        let sync = self.sync.as_ref()?;
+        let sync = self.parts.sync.as_ref()?;
         let folders = sync.folders();
         let selected = self.selected();
         let chosen = selected
@@ -448,7 +408,7 @@ impl Folders {
         Some(view::folder_controls(&FolderList {
             folders: &folders,
             selected: selected.as_deref(),
-            unlocked: self.session.unlocked() && !self.disconnect_pending.get(),
+            unlocked: self.parts.session.unlocked() && !self.parts.disconnect_pending.get(),
             busy: sync.busy(),
             current: current.as_deref(),
             local_exists: chosen.is_some_and(|folder| folder.local.is_dir()),
