@@ -125,6 +125,23 @@ copy, that renewal reads the saved account and refuses another one, and that the
 copy is removed. It stops before the answer that would contact Apple; a real
 sign-in requires the maintainer's account.
 
+To harden synced folders against the real account, and again only with explicit
+authorization, close the app and run this from a desktop terminal on Linux:
+
+```sh
+cargo test --package icloud-core --test icloud_sync -- --account
+```
+
+It asks for the local key and for confirmation, then syncs a new
+`icloud-on-linux-test-<id>` folder through a private copy of the encrypted profile,
+mounted in a private folder: 300 small files, a 100 MB file checked by download, a
+path 15 folders deep, names iCloud may refuse or change, a change made elsewhere,
+and local deletions. It prints timings, refused names, and rate limit messages,
+never raw rclone output, and finally deletes the folder after checking its owner
+marker; iCloud keeps it in Recently Deleted. `--small` skips the large file, and
+`--fictional` runs the same steps against a local stand-in. Without either option
+the program only prints that it was skipped.
+
 For packaging or distribution changes, build the `.deb` and `.rpm` with native
 tools in disposable containers, then install and check them:
 

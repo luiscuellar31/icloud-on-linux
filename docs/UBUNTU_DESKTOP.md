@@ -119,12 +119,29 @@ soon; a connected app disconnects first. Disconnect an older terminal mount firs
 Apple trusts a signed-in session for 30 days. After signing in from the app, the
 window warns five days before that and offers **Renew**.
 
+If your account uses Advanced Data Protection, turn on 'Access iCloud Data on the
+Web' in iCloud settings on your iPhone, iPad, or Mac before signing in, and approve
+the request that appears on your trusted device. Without it, Apple refuses the
+access and the app explains this setting.
+
 Renew an expired session with the same steps and the Apple account already saved
 in the app. The current session is kept until the new one can read iCloud Drive,
 so cancelling or a failed attempt changes nothing. A rejected code ends the
-attempt; sign in again to request a new code. Another Apple account is refused
-while a saved session exists. Credentials and codes never appear in process
-arguments or logs.
+attempt; sign in again to request a new code. Renewing refuses another Apple
+account, so pending uploads stay with theirs; use **Change Apple account...**
+instead. Credentials and codes never appear in process arguments or logs.
+
+## Sign out or change the Apple account
+
+**Sign out of this computer...** in the menu removes the saved session, the key in
+the keyring, cached file contents, pending uploads, and the synced folder list with
+its Backups. The dialog lists what will be removed. Your copies in `~/iCloud Sync`
+stay unless you check the box to move them to the Trash. Nothing is removed from
+iCloud. **Change Apple account...** does the same and then opens sign-in for the
+other account. A connected app disconnects first.
+
+If something goes wrong, **Save diagnostic report...** writes a text file you can
+share. It has no keys, tokens, file contents, or file and folder names.
 
 ## Upload files
 

@@ -28,6 +28,8 @@ syncing from the tray after you close its window.
 - Upload files with a visible queue, pause and resume, and conflict decisions.
 - Create, edit, move, and delete files from Files or Dolphin in synced folders,
   with both versions kept on conflicts and mass deletions held for review.
+- Sign out of this computer or change the Apple account without touching iCloud,
+  with guidance for Advanced Data Protection and a shareable diagnostic report.
 - List and download files from a terminal through the Docker environment.
 
 The `~/iCloud` mount is read-only. To edit, sync a folder to `~/iCloud Sync`, or

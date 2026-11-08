@@ -30,6 +30,7 @@ and Fedora 45 containers.
 | [packaging/control](../packaging/control) and [packaging/icloud-on-linux.spec](../packaging/icloud-on-linux.spec) | Declare package metadata and dependencies. |
 | [packaging/io.github.luiscuellar31.IcloudOnLinux.desktop](../packaging/io.github.luiscuellar31.IcloudOnLinux.desktop) | Desktop entry for the packaged and user installations. |
 | [crates/core/src/auth.rs](../crates/core/src/auth.rs) and [crates/app/src/signin.rs](../crates/app/src/signin.rs) | Run the sign-in steps on a private profile copy, answer setup questions, check access, and publish the profile; the dialog collects the key, Apple account, password, and verification answers. |
+| [crates/core/src/diagnostics.rs](../crates/core/src/diagnostics.rs) | Write the support report with versions, settings, and states, without keys, tokens, file contents, or file and folder names. |
 | [crates/core/src/session.rs](../crates/core/src/session.rs) | Unlock the saved profile with the local key, mount iCloud Drive read-only through rclone, and disconnect only the app's own mount. |
 | [crates/core/src/uploads.rs](../crates/core/src/uploads.rs) | Own private upload snapshots, durable queue storage, path validation, and local cleanup. |
 | [crates/core/src/transfers.rs](../crates/core/src/transfers.rs) | Prepare files in a worker thread, run one rclone command at a time, verify cloud bytes, and pause or resolve conflicts. |
@@ -119,11 +120,12 @@ rclone state, and answer travel only in its `RCLONE_CONFIG_PASS`, `RCLONE_STATE`
 and `RCLONE_RESULT` environment variables, never in arguments. The app overwrites
 its own copies of the key, password, and step output when the attempt ends; copies
 that GTK text fields and the standard library make for a child's environment cannot
-be overwritten. Standard error is discarded. A failure, cancellation, or 120-second
-step timeout keeps the saved profile and removes the copy, and the next sign-in
-removes copies that a crash left behind for more than an hour. Quitting or ending
-the desktop session cancels a running step first. A rejected code ends the attempt;
-signing in again requests a new code.
+be overwritten. Of standard error, only a 16 KiB tail stays in memory, to recognize
+an Advanced Data Protection refusal; it is never shown or saved. A failure,
+cancellation, or 120-second step timeout keeps the saved profile and removes the
+copy, and the next sign-in removes copies that a crash left behind for more than an
+hour. Quitting or ending the desktop session cancels a running step first. A
+rejected code ends the attempt; signing in again requests a new code.
 
 The app records in `settings.ini` when it last published a profile. Apple trusts a
 signed-in rclone session for 30 days, so five days before that the window offers
@@ -134,6 +136,30 @@ Renewal changes the profile bytes. Before replacing them, the app writes
 `profile-links.json`, which maps the new and old profile hashes to the identity of
 the original profile. Either profile therefore keeps that identity after a crash,
 so work bound to the account keeps its owner. A different account is refused.
+
+### Account management and diagnostics
+
+Accounts with Advanced Data Protection need extra cookies that Apple issues only
+when 'Access iCloud Data on the Web' is on and a trusted device approves. rclone
+then reports `requestPCS` or Apple's `Missing PCS cookies`. The sign-in steps and
+the connection keep only the tail of rclone's error output, in memory, to recognize
+those words and explain the setting; that refusal is never retried automatically.
+
+**Sign out of this computer...** removes the saved session, its identity links,
+interrupted sign-in copies, the cached file contents, the key in the keyring, the
+sign-in time, pending uploads, and the synced folder list with its state and
+Backups. The local copies stay unless the user asks to move them to the Trash,
+where unsynced edits remain recoverable; the iCloud Sync place leaves the sidebar
+only when that empties the folder. iCloud is never changed. **Change Apple
+account...** signs out the same way and then opens sign-in, because pending uploads
+and synced folders belong to the account that created them. A connected or
+reconnecting app disconnects first; if that fails, nothing is removed.
+
+**Save diagnostic report...** writes a text file the user chooses. It lists the
+distribution, desktop, app, GTK, libadwaita, and rclone versions, how the app was
+installed, the app settings, the connection state, each synced folder as `Folder N`
+with its state and counts, and upload counts by state. Quoted names in messages and
+the home path are hidden.
 
 ## Managed uploads
 
@@ -399,6 +425,13 @@ Dockerfile and the session script needed by the image to the builder.
   upload. Then, in a new window, it connects, reconnects on its own after the mount
   drops and stops waiting with Cancel after a second drop, opens the file manager,
   and disconnects.
+- The unit tests of [crates/core/src/diagnostics.rs](../crates/core/src/diagnostics.rs)
+  check that the report omits names, keys, and profile contents, and the visible
+  check signs out, changes the account, and saves a report with fictional data and
+  stand-ins for the keyring, the sidebar places, and the Trash.
+  [crates/core/tests/icloud_sync.rs](../crates/core/tests/icloud_sync.rs) exercises
+  synced folders against the real account in a new owned test folder, only when run
+  with `--account`, or against a local stand-in with `--fictional`.
 - [crates/core/tests/auth.rs](../crates/core/tests/auth.rs): native sign-in, 2FA,
   SMS, renewal identity, cancellation, and save failures through a local rclone
   stand-in. [crates/core/tests/sign_in.rs](../crates/core/tests/sign_in.rs) runs
