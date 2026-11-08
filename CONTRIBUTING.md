@@ -67,7 +67,21 @@ bash -n start.command open-ubuntu.command scripts/*.sh tests/check-linux-mount.s
 ```
 
 The Python tests replace Docker, rclone, and VirtualBox with local stand-ins. They
-need no Apple account and do not start a VM. No linter is configured.
+need no Apple account and do not start a VM. No linter is configured for them.
+
+The native app is written in Rust, in the Cargo workspace under `crates/`. Use a
+current stable toolchain from rustup; the workspace declares the oldest supported
+version. For changes there, run from the repository root:
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets
+cargo test
+```
+
+Run the tests on Linux as well: process protection and mount checks depend on it.
+Keep `unsafe` code out of the crates except where a system call requires it, and
+explain each such block in a `SAFETY` comment.
 
 For container or shared session changes, build the image:
 

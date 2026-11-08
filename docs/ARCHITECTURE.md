@@ -14,6 +14,7 @@ GNOME. A dedicated native interface and KDE integration are not implemented yet.
 | [scripts/linux-start.sh](../scripts/linux-start.sh) | Check the Linux environment, select the user configuration, and open or reuse `~/iCloud`. |
 | [open-ubuntu.command](../open-ubuntu.command) | Open only the VirtualBox VM identified by `.vm/uuid`; do not create or provision machines. |
 | [scripts/provision-desktop.sh](../scripts/provision-desktop.sh) | Prepare the dedicated VM desktop and shortcuts using resources from its `cidata` medium. |
+| [crates/core](../crates/core) | Rust library for the native app without a user interface: paths, profile and mount checks, translated text, change signals, and child processes that die with the app. |
 
 Provisioning assumes Ubuntu with GNOME, the `icloud` user, and a prepared medium
 containing scripts, the rclone package, and its checksum. It verifies the package
