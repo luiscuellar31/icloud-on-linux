@@ -511,10 +511,12 @@ version = "0.1.0"
 dependencies = [
  "getrandom",
  "nix",
+ "proc-macro2",
  "regex",
  "serde",
  "serde_json",
  "sha2",
+ "syn",
  "tempfile",
  "zeroize",
 ]

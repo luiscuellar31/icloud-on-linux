@@ -56,6 +56,7 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::FAILURE;
     }
     nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_truncate(0o077));
+    icloud_core::i18n::apply("auto");
     let application = adw::Application::builder().application_id(APP_ID).build();
     // GApplication keeps one copy running; opening the app again shows its window.
     let shown: Rc<RefCell<Option<Rc<window::Window>>>> = Rc::default();

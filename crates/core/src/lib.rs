@@ -13,6 +13,7 @@ pub mod session;
 pub mod signal;
 pub mod sync;
 pub mod transfers;
+pub mod translation_es;
 pub mod uploads;
 
 use std::fmt;

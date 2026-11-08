@@ -15,3 +15,8 @@ serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+# Read the `tr!` texts from the sources to check the translations.
+proc-macro2 = "1"
+syn = "3"

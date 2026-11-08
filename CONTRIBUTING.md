@@ -40,6 +40,10 @@ explicit request from the maintainer; preparing a change does not authorize eith
   across Docker, Ubuntu, the packages, and the guides.
 - Documentation must have lasting value. Extend an existing document before
   adding another; keep session logs and temporary reports outside the repository.
+- Pass user-visible text to `tr!` from `icloud_core::i18n` as a literal and add
+  its Spanish entry to `crates/core/src/translation_es.rs`;
+  `crates/core/tests/translations.rs` fails otherwise. Keep state names in English
+  in code and translate them only where the window shows them.
 
 ## Test data and environment
 
