@@ -8,6 +8,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use icloud_core::connection::Connection;
+use icloud_core::places::Places;
 use icloud_core::session::Session;
 use icloud_core::sync::{State as FolderState, SyncFolder, SyncedFolders};
 use icloud_core::tr;
@@ -69,6 +70,8 @@ pub struct Folders {
     sync_now: gio::SimpleAction,
     backups: gio::SimpleAction,
     stop: gio::SimpleAction,
+    /// Where Add folder puts the iCloud Sync place.
+    places: RefCell<Places>,
     disconnect_pending: Cell<bool>,
 }
 
@@ -158,6 +161,7 @@ impl Folders {
             sync_now,
             backups,
             stop,
+            places: RefCell::new(Places::for_user()),
             disconnect_pending: Cell::new(false),
         });
         this.connect_signals();
@@ -264,9 +268,19 @@ impl Folders {
 
     /// Sync the iCloud Drive folder chosen in the mount, as the folder dialog does.
     pub fn add_chosen(&self, chosen: &Path) {
-        if let Some(sync) = &self.sync {
-            sync.add(&view::chosen_folder(&self.session.paths().mount, chosen));
+        let Some(sync) = &self.sync else {
+            return;
+        };
+        if sync.add(&view::chosen_folder(&self.session.paths().mount, chosen)) {
+            // The editable copies live outside the read-only mount, so Files and Dolphin get a direct place. It is
+            // a convenience: syncing works without it.
+            let _ = self.places.borrow().add(sync.local_root(), "iCloud Sync");
         }
+    }
+
+    /// Keep sidebar places in other settings files, as checks do to leave the desktop's own unchanged.
+    pub fn use_places(&self, places: Places) {
+        *self.places.borrow_mut() = places;
     }
 
     fn parent(&self) -> Option<gtk::Window> {

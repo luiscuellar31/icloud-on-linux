@@ -6,6 +6,7 @@ pub mod auth;
 pub mod connection;
 pub mod i18n;
 pub mod paths;
+pub mod places;
 pub mod process;
 pub mod profile;
 pub mod session;

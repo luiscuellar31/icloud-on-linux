@@ -4,6 +4,7 @@
 use std::fs;
 
 use adw::prelude::*;
+use icloud_core::places::Places;
 use icloud_core::sync::{Review, State as FolderState};
 use icloud_on_linux::window::Window;
 
@@ -34,9 +35,20 @@ pub fn check(window: &Window, fixture: &Fixture) {
         )
         .unwrap();
     }
+    // The place goes to temporary settings, so the desktop's own sidebar stays unchanged.
+    let places = Places {
+        gtk: fixture.root.path().join("config-home/gtk-3.0/bookmarks"),
+        kde: fixture.root.path().join("data-home/user-places.xbel"),
+    };
+    window.folders.use_places(places.clone());
     window.folders.add_chosen(&fixture.paths.mount.join("Docs"));
     let added = sync.folders();
     assert_eq!(added.len(), 1, "{}", sync.message());
+    let place = sync.local_root().to_str().unwrap().replace(' ', "%20");
+    assert_eq!(
+        fs::read_to_string(&places.gtk).unwrap(),
+        format!("file://{place} iCloud Sync\n")
+    );
     let (identifier, local) = (added[0].identifier.clone(), added[0].local.clone());
     let folder = || sync.folder(&identifier).unwrap();
     wait(90, "the first copy finishes", || {
