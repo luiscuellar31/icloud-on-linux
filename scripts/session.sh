@@ -5,12 +5,38 @@ umask 077
 
 session_mode="${1:-shell}"
 case "$session_mode" in
-    shell|mount|check) ;;
+    shell|mount|check|auth-init|auth-inspect|auth-create|auth-answer|auth-password|auth-probe) ;;
     *) printf 'Invalid session mode.\n' >&2; exit 1 ;;
 esac
 
 : "${RCLONE_CONFIG:?The rclone configuration path is missing}"
 trap 'unset RCLONE_CONFIG_PASS confirmation' EXIT
+
+case "$session_mode" in
+    auth-init)
+        [[ ! -e "$RCLONE_CONFIG" && -n "${RCLONE_CONFIG_PASS:-}" ]] || exit 20
+        exec rclone --ask-password=false config encryption set --password-command 'printenv RCLONE_CONFIG_PASS'
+        ;;
+    auth-*)
+        [[ -f "$RCLONE_CONFIG" && -O "$RCLONE_CONFIG" && ! -L "$RCLONE_CONFIG" ]] || exit 20
+        grep -q '^RCLONE_ENCRYPT_V0:' "$RCLONE_CONFIG" || exit 21
+        case "$session_mode" in
+            # Only the remote's type, service, and account leave rclone; its password and tokens stay there.
+            auth-inspect)
+                rclone --ask-password=false config show icloud | { grep -E '^(\[icloud\]$|(type|service|apple_id) = )' || true; }
+                exit
+                ;;
+            auth-create) exec rclone --ask-password=false config create icloud iclouddrive --all --non-interactive ;;
+            auth-answer) exec rclone --ask-password=false config update icloud --all --non-interactive --continue ;;
+            auth-password)
+                # Continued answers are saved verbatim, but the backend reads its password obscured.
+                RCLONE_RESULT="$(printenv RCLONE_RESULT | rclone --ask-password=false obscure -)"
+                exec rclone --ask-password=false config update icloud --all --non-interactive --continue
+                ;;
+            auth-probe) exec rclone --ask-password=false --contimeout 15s --timeout 45s --retries 1 --low-level-retries 1 lsjson --stat icloud: ;;
+        esac
+        ;;
+esac
 
 if [[ "$session_mode" == check ]]; then
     [[ -f "$RCLONE_CONFIG" && -O "$RCLONE_CONFIG" && ! -L "$RCLONE_CONFIG" ]] || exit 20
