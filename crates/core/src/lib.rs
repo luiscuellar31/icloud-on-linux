@@ -2,10 +2,12 @@
 //! start child processes, a timer calls their `tick` methods, and a `Signal` tells the window to render again.
 #![deny(unsafe_code)]
 
+pub mod connection;
 pub mod i18n;
 pub mod paths;
 pub mod process;
 pub mod profile;
+pub mod session;
 pub mod signal;
 
 use std::fmt;

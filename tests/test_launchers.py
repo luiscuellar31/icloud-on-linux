@@ -95,6 +95,21 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(self.calls(), [])
         self.assertNotIn('Local key', result.stdout + result.stderr)
 
+    def test_native_check_unlocks_quietly_without_mutating_the_profile(self):
+        self.config.write_text(ENCRYPTED_FIXTURE)
+        result = self.run_script('scripts/session.sh', f'{KEY}\n', arguments=('check',), REMOTE_NAMES='icloud:')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(self.config.read_text(), ENCRYPTED_FIXTURE)
+        self.assertEqual([args[1] for _, args in self.calls()], ['listremotes'])
+
+    def test_native_check_refuses_a_failed_unlock_without_writing_configuration(self):
+        self.config.write_text(ENCRYPTED_FIXTURE)
+        result = self.run_script('scripts/session.sh', f'{KEY}\n', arguments=('check',), RCLONE_FAIL='listremotes')
+        self.assertEqual(result.returncode, 22)
+        self.assertEqual(result.stdout + result.stderr, '')
+        self.assertEqual(self.config.read_text(), ENCRYPTED_FIXTURE)
+
     def test_new_session_encrypts_before_creating_remote_and_lists_read_only(self):
         result = self.run_script("scripts/session.sh", f"{KEY}\n{KEY}\n")
         self.assertEqual(result.returncode, 0, result.stderr)

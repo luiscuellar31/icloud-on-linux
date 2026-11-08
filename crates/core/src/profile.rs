@@ -106,7 +106,18 @@ pub fn check_profile(path: &Path) -> Result<()> {
 }
 
 pub fn sha256(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+    hex(&Sha256::digest(bytes))
+}
+
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// 128 random bits as hexadecimal, for private names that must not collide.
+pub fn random_hex() -> std::io::Result<String> {
+    let mut bytes = [0; 16];
+    getrandom::fill(&mut bytes)?;
+    Ok(hex(&bytes))
 }
 
 /// The identity of a profile: its SHA-256, or the identity it inherited when a renewal replaced it.

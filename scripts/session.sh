@@ -5,12 +5,25 @@ umask 077
 
 session_mode="${1:-shell}"
 case "$session_mode" in
-    shell|mount) ;;
+    shell|mount|check) ;;
     *) printf 'Invalid session mode.\n' >&2; exit 1 ;;
 esac
 
 : "${RCLONE_CONFIG:?The rclone configuration path is missing}"
 trap 'unset RCLONE_CONFIG_PASS confirmation' EXIT
+
+if [[ "$session_mode" == check ]]; then
+    [[ -f "$RCLONE_CONFIG" && -O "$RCLONE_CONFIG" && ! -L "$RCLONE_CONFIG" ]] || exit 20
+    grep -q '^RCLONE_ENCRYPT_V0:' "$RCLONE_CONFIG" || exit 21
+    IFS= read -r -s RCLONE_CONFIG_PASS || exit 22
+    [[ -n "$RCLONE_CONFIG_PASS" ]] || exit 22
+    export RCLONE_CONFIG_PASS
+    remotes="$(rclone --ask-password=false listremotes 2>/dev/null)" || exit 22
+    case $'\n'"$remotes"$'\n' in
+        *$'\nicloud:\n'*) exit 0 ;;
+        *) exit 23 ;;
+    esac
+fi
 
 printf 'iCloud Drive - read-only lab\n\n'
 printf 'The local key protects your saved session and is separate from your Apple password.\n'

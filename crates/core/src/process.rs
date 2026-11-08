@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use nix::sys::signal::{self, Signal as UnixSignal};
 use nix::unistd::Pid;
+use zeroize::Zeroizing;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -41,6 +42,8 @@ impl Process {
     /// `guard`, Linux kills the process when this app dies. Start guarded processes from the main thread: the kernel
     /// ties that signal to the thread that started them.
     pub fn start(mut command: Command, input: Option<Vec<u8>>, guard: bool) -> io::Result<Process> {
+        // The input may be a key, so its bytes are cleared once written, or dropped unwritten.
+        let input = input.map(Zeroizing::new);
         command
             .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
@@ -115,7 +118,8 @@ fn forward(
     wrap: fn(Vec<u8>) -> Event,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let mut buffer = vec![0; 64 * 1024];
+        // Output can hold secrets, so the buffer is cleared when the stream ends.
+        let mut buffer = Zeroizing::new(vec![0; 64 * 1024]);
         while let Ok(count @ 1..) = stream.read(&mut buffer) {
             if sender.send(wrap(buffer[..count].to_vec())).is_err() {
                 break;

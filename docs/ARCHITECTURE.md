@@ -14,6 +14,7 @@ GNOME. A dedicated native interface and KDE integration are not implemented yet.
 | [scripts/linux-start.sh](../scripts/linux-start.sh) | Check the Linux environment, select the user configuration, and open or reuse `~/iCloud`. |
 | [open-ubuntu.command](../open-ubuntu.command) | Open only the VirtualBox VM identified by `.vm/uuid`; do not create or provision machines. |
 | [scripts/provision-desktop.sh](../scripts/provision-desktop.sh) | Prepare the dedicated VM desktop and shortcuts using resources from its `cidata` medium. |
+| [crates/core/src/session.rs](../crates/core/src/session.rs) | Unlock the saved profile with the local key, mount iCloud Drive read-only through rclone, and disconnect only the app's own mount. |
 | [crates/core](../crates/core) | Rust library for the native app without a user interface: paths, profile and mount checks, translated text, change signals, and child processes that die with the app. |
 
 Provisioning assumes Ubuntu with GNOME, the `icloud` user, and a prepared medium
@@ -41,6 +42,22 @@ The local key reaches rclone through the environment and a command that reads
 that variable, without placing its value in arguments. It is not saved in a
 separate file. In terminal mode it remains in that session environment; in mount
 mode the assistant unsets its variable after starting rclone.
+
+## Native connection
+
+The native session reuses the `check` mode of `scripts/session.sh`: it receives the
+local key on standard input, checks the existing encrypted profile, and returns only
+a status code. It prints no remote names and never creates or re-encrypts a profile.
+The session then copies the profile into a private folder under the user runtime
+directory, so rclone never rewrites the saved one, and runs `rclone mount` read-only
+with a unique device name, a private VFS cache, and the key in its environment only.
+
+The key stays in memory while connected and is overwritten when the session clears
+it. Disconnect checks the mount identity before running `fusermount3 -u`; a busy or
+replaced mount is preserved, and only the client the session started is ended. An
+existing compatible mount from the terminal lab can be opened and disconnected.
+Child processes report through threads and a channel; the window calls the
+session's `tick` every 200 ms to collect results and compare the kernel's mounts.
 
 ## Mount and desktop integration
 
