@@ -1,0 +1,11 @@
+Package: icloud-on-linux
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Luis Cuellar <135315478+luiscuellar31@users.noreply.github.com>
+Section: net
+Priority: optional
+Depends: @SHLIBS@, rclone (>= 1.75.2), fuse3
+Homepage: https://github.com/luiscuellar31/icloud-on-linux
+Description: native iCloud Drive client for the Linux desktop
+ Signs in to iCloud Drive through rclone and opens it read-only in the file
+ manager. The app is written in Rust with GTK 4 and libadwaita.

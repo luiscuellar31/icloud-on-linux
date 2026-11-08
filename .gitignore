@@ -7,3 +7,4 @@ rclone.conf.*
 __pycache__/
 .vm/
 /target
+dist/
