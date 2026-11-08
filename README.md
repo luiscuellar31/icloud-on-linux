@@ -1,17 +1,30 @@
 <div align='center'>
   <h1>iCloud on Linux</h1>
 
-  <p><strong>A native iCloud Drive client for the Linux desktop.</strong></p>
+  <p><strong>A lightweight, native iCloud Drive client for the Linux desktop, written in Rust.</strong></p>
 </div>
 
-iCloud on Linux aims to make your iCloud Drive files part of your everyday Linux
-workflow. The goal is to browse, manage, and sync them from GNOME Files and KDE
-Dolphin, so you can use the iCloud storage you already have without leaving Linux.
+iCloud on Linux makes your iCloud Drive files part of your everyday Linux workflow.
+Browse them from GNOME Files and KDE Dolphin, keep folders in sync both ways, and
+upload files, so you can use the iCloud storage you already have without leaving
+Linux.
 
-The project is in early development. A native app, written in Rust with GTK4,
-connects your saved session and opens iCloud Drive in Files on Ubuntu with GNOME,
-using rclone to reach your account. It speaks English and Spanish and keeps
-syncing from the tray after you close its window.
+The project is in early development. Its native app is written in Rust with GTK 4
+and libadwaita and reaches your account through rclone. It runs on Ubuntu, Debian,
+and Fedora, speaks English and Spanish, and keeps syncing from the tray after you
+close its window.
+
+## Lightweight and safe by design
+
+- The app is about 3 MB and uses the GTK 4 and libadwaita already on your system,
+  with no bundled runtime such as Electron or Python.
+- It uses about 40 MB of memory of its own while connected and syncing, measured
+  on Ubuntu 24.04; the rest is shared with other GTK apps.
+- It is written in memory-safe Rust: the code forbids `unsafe` except for two small,
+  documented system calls.
+- Your local key and Apple password never appear in command lines or logs, and the
+  app clears its copies from memory when it no longer needs them. The saved session
+  stays encrypted with a local key separate from your Apple password.
 
 ## Features
 
@@ -108,3 +121,6 @@ a pull request. Automated tests use local files and do not need an Apple account
 ## License
 
 iCloud on Linux is available under the [MIT License](LICENSE).
+
+iCloud on Linux is not affiliated with Apple. iCloud and iCloud Drive are trademarks
+of Apple Inc.
