@@ -8,7 +8,6 @@ pub static SPANISH: &[(&str, &str)] = &[
     ("Connecting...", "Conectando..."),
     ("Connected", "Conectado"),
     ("Disconnecting...", "Desconectando..."),
-    ("Reconnecting...", "Reconectando..."),
     ("Needs attention", "Requiere atención"),
     ("Review needed", "Revisión pendiente"),
     ("Sync problem", "Problema de sincronización"),
@@ -45,12 +44,13 @@ pub static SPANISH: &[(&str, &str)] = &[
         "The file manager could not be opened. You can still disconnect safely.",
         "No se pudo abrir el gestor de archivos. Aun así puedes desconectarte de forma segura.",
     ),
-    // Background mode
     ("Start at login", "Abrir al iniciar sesión"),
+    ("Reconnecting...", "Reconectando..."),
     (
         "Unlock automatically on this computer",
         "Desbloquear automáticamente en este equipo",
     ),
+    ("Unlock automatically", "Desbloquear automáticamente"),
     (
         "Saves the local key in your desktop keyring, so your Linux login protects your iCloud Drive instead.",
         "Guarda la clave local en el llavero del escritorio; así tu inicio de sesión de Linux protege tu iCloud Drive.",
@@ -59,7 +59,6 @@ pub static SPANISH: &[(&str, &str)] = &[
         "Install secret-tool (libsecret-tools) to save the key in your desktop keyring.",
         "Instala secret-tool (libsecret-tools) para guardar la clave en el llavero del escritorio.",
     ),
-    ("Unlock automatically", "Desbloquear automáticamente"),
     (
         "Your local key will be saved in the desktop keyring. Anyone who can use your Linux account will be able to open your iCloud Drive without typing it. Turn this on?",
         "Tu clave local se guardará en el llavero del escritorio. Cualquiera que pueda usar tu cuenta de Linux podrá abrir tu iCloud Drive sin escribirla. ¿Activar esta opción?",
@@ -69,6 +68,7 @@ pub static SPANISH: &[(&str, &str)] = &[
         "No se pudo guardar la clave en el llavero del escritorio. Escríbela la próxima vez que te conectes.",
     ),
     ("Renew", "Renovar"),
+    ("Renew your Apple session", "Renueva tu sesión de Apple"),
     (
         "Your Apple session may have ended. Renew it to keep syncing.",
         "Es posible que tu sesión de Apple haya terminado. Renuévala para seguir sincronizando.",
@@ -81,18 +81,17 @@ pub static SPANISH: &[(&str, &str)] = &[
         "Your Apple session ends in about {days} days. Renew it to keep syncing.",
         "Tu sesión de Apple termina en unos {days} días. Renuévala para seguir sincronizando.",
     ),
-    ("Renew your Apple session", "Renueva tu sesión de Apple"),
-    ("iCloud Drive needs attention", "iCloud Drive requiere atención"),
+    ("Show window", "Mostrar ventana"),
     (
         "A synced folder needs your review",
         "Una carpeta sincronizada requiere tu revisión",
     ),
     ("Uploads need your decision", "Las subidas requieren tu decisión"),
-    ("Show window", "Mostrar ventana"),
-    ("iCloud on Linux is still running", "iCloud on Linux sigue en ejecución"),
+    ("iCloud Drive needs attention", "iCloud Drive requiere atención"),
+    ("Quit iCloud on Linux", "Salir de iCloud on Linux"),
     (
-        "Syncing continues in the background. Use its icon to open the window or quit.",
-        "La sincronización continúa en segundo plano. Usa su icono para abrir la ventana o salir.",
+        "Quitting pauses uploads, stops syncing, and disconnects iCloud Drive. Quit now?",
+        "Al salir se pausan las subidas, se detiene la sincronización y se desconecta iCloud Drive. ¿Salir ahora?",
     ),
     ("Keep syncing?", "¿Seguir sincronizando?"),
     (
@@ -100,10 +99,10 @@ pub static SPANISH: &[(&str, &str)] = &[
         "iCloud on Linux puede seguir sincronizando después de cerrar esta ventana. Para volver a verla, abre iCloud on Linux desde tus aplicaciones.",
     ),
     ("Keep syncing", "Seguir sincronizando"),
-    ("Quit iCloud on Linux", "Salir de iCloud on Linux"),
+    ("iCloud on Linux is still running", "iCloud on Linux sigue en ejecución"),
     (
-        "Quitting pauses uploads, stops syncing, and disconnects iCloud Drive. Quit now?",
-        "Al salir se pausan las subidas, se detiene la sincronización y se desconecta iCloud Drive. ¿Salir ahora?",
+        "Syncing continues in the background. Use its icon to open the window or quit.",
+        "La sincronización continúa en segundo plano. Usa su icono para abrir la ventana o salir.",
     ),
     // Sign-in
     ("Sign in to iCloud", "Iniciar sesión en iCloud"),
@@ -208,6 +207,10 @@ pub static SPANISH: &[(&str, &str)] = &[
     (
         "The saved profile identity is invalid.",
         "La identidad del perfil guardado no es válida.",
+    ),
+    (
+        "Your Apple account uses Advanced Data Protection, and Apple refused this access. On your iPhone, iPad, or Mac, turn on 'Access iCloud Data on the Web' in iCloud settings. Then sign in again here and approve the request on your trusted device.",
+        "Tu cuenta de Apple usa la Protección de datos avanzada y Apple rechazó este acceso. En tu iPhone, iPad o Mac, activa 'Acceder a los datos de iCloud en la web' en la configuración de iCloud. Después vuelve a iniciar sesión aquí y aprueba la solicitud en tu dispositivo de confianza.",
     ),
     // Connection
     (

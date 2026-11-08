@@ -82,6 +82,7 @@ struct Inner {
     retries: usize,
     reconnect_at: Option<Instant>,
     reconnect_delays: Vec<Duration>,
+    errors: Vec<u8>,
 }
 
 impl Session {
@@ -323,6 +324,7 @@ impl Session {
             return;
         }
         self.set_status(State::Connecting, tr!("Connecting to iCloud Drive..."));
+        self.inner.borrow_mut().errors.clear();
         let mut command = self.command("rclone", true);
         let device = self.inner.borrow().device.clone();
         command
@@ -346,15 +348,26 @@ impl Session {
     }
 
     fn client_finished(&self, _code: i32) {
+        let disconnecting = self.state() == State::Disconnecting;
         {
             let mut inner = self.inner.borrow_mut();
             inner.client = None;
             inner.kill_client_at = None;
+            // A vanished mount can be noticed first; that stop is unexpected too, so the cause still matters.
+            let unexpected = !disconnecting || inner.stop_error.is_some();
+            if unexpected && profile::web_access_blocked(&inner.errors) {
+                // Reconnecting cannot help until the account allows web access, so this stop is not retried.
+                inner.stop_error = Some(profile::web_access_message());
+                inner.available_at = None;
+                inner.retry_key = Zeroizing::new(String::new());
+            } else if !disconnecting {
+                inner.stop_error = Some(tr!(
+                    "The connection stopped. Check your network or renew the saved session and reconnect."
+                ));
+            }
+            inner.errors.clear();
         }
-        if self.state() != State::Disconnecting {
-            self.inner.borrow_mut().stop_error = Some(tr!(
-                "The connection stopped. Check your network or renew the saved session and reconnect."
-            ));
+        if !disconnecting {
             self.set_status(State::Disconnecting, tr!("Closing the connection..."));
         }
         self.continue_stop();
@@ -382,13 +395,25 @@ impl Session {
                 })
             })
         };
-        let (check, client, unmounter) = {
+        let client_events = self
+            .inner
+            .borrow()
+            .client
+            .as_ref()
+            .map(Process::events)
+            .unwrap_or_default();
+        let mut client = None;
+        for event in client_events {
+            match event {
+                // Only the tail stays, in memory, to recognize a cause; it is never shown or saved.
+                Event::Stderr(bytes) => profile::keep_error_tail(&mut self.inner.borrow_mut().errors, &bytes),
+                Event::Exited(code) => client = Some(code),
+                Event::Stdout(_) => {}
+            }
+        }
+        let (check, unmounter) = {
             let inner = self.inner.borrow();
-            (
-                finished(&inner.check),
-                finished(&inner.client),
-                finished(&inner.unmounter),
-            )
+            (finished(&inner.check), finished(&inner.unmounter))
         };
         if let Some(code) = check {
             self.checked(code);

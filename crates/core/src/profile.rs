@@ -107,6 +107,28 @@ pub fn check_profile(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The most of a command's error output kept, in memory only, to recognize a cause.
+pub const ERROR_TAIL: usize = 16 * 1024;
+
+/// Keep only the last `ERROR_TAIL` bytes of `errors` after adding `more`.
+pub fn keep_error_tail(errors: &mut Vec<u8>, more: &[u8]) {
+    errors.extend_from_slice(more);
+    let excess = errors.len().saturating_sub(ERROR_TAIL);
+    errors.drain(..excess);
+}
+
+/// Whether rclone failed to get the extra cookies that Advanced Data Protection accounts need.
+pub fn web_access_blocked(output: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(output);
+    text.contains("requestPCS") || text.contains("Missing PCS cookies")
+}
+
+pub fn web_access_message() -> String {
+    tr!(
+        "Your Apple account uses Advanced Data Protection, and Apple refused this access. On your iPhone, iPad, or Mac, turn on 'Access iCloud Data on the Web' in iCloud settings. Then sign in again here and approve the request on your trusted device."
+    )
+}
+
 pub fn sha256(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }

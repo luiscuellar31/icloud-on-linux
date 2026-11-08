@@ -37,6 +37,10 @@ case " $* " in
             code:sms) question phone config_2fa_phone ', "Examples": [{"Value": "1_sms", "Help": "Trusted phone ending in 01"}]' ;;
             phone:1_sms) question sms config_2fa_sms ;;
             *:123456)
+                if [ -e "@ROOT@/pcs-fails" ]; then
+                    echo 'requestPCS(fixture): server returned success but cookies still missing' >&2
+                    exit 1
+                fi
                 printf 'RCLONE_ENCRYPT_V0:\nnew-signed-in-fixture\n' > "$RCLONE_CONFIG"
                 printf '{"State": "", "Option": null, "Error": ""}\n' ;;
             *) echo 'Fictional backend token must not be shown' >&2; exit 1 ;;
@@ -282,4 +286,18 @@ fn a_new_sign_in_removes_copies_left_by_interrupted_attempts() {
     assert!(folder.join(".signin-recent").exists());
     bench.auth.cancel();
     bench.wait(|auth| !auth.active());
+}
+
+#[test]
+fn an_advanced_data_protection_refusal_explains_web_access() {
+    let bench = Bench::new();
+    bench.flag("pcs-fails");
+    bench.begin();
+    bench.auth.answer("123456");
+    bench.wait(|auth| !auth.active());
+    let message = bench.auth.message();
+    assert!(message.contains("Advanced Data Protection"), "{message}");
+    assert!(!message.contains("requestPCS"));
+    assert_eq!(fs::read(&bench.config).unwrap(), PROFILE);
+    assert_eq!(bench.leftovers(), 0);
 }

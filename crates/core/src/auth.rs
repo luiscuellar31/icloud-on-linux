@@ -50,6 +50,7 @@ struct Inner {
     identity: Option<String>,
     // Setup steps print rclone's continuation state, so their output is cleared after reading.
     output: Zeroizing<Vec<u8>>,
+    errors: Zeroizing<Vec<u8>>,
     steps: u32,
     cancelled: bool,
     published: bool,
@@ -249,6 +250,7 @@ impl Authorization {
             inner.question.clear();
             inner.choices.clear();
             inner.output.clear();
+            inner.errors.clear();
             inner.action = action.to_owned();
             inner.message = if action == "auth-probe" {
                 tr!("Checking access...")
@@ -288,7 +290,8 @@ impl Authorization {
                         }
                     }
                 }
-                Event::Stderr(_) => {}
+                // Only the tail stays, in memory, to recognize a cause; it is never shown or saved.
+                Event::Stderr(bytes) => profile::keep_error_tail(&mut self.inner.borrow_mut().errors, &bytes),
                 Event::Exited(code) => exited = Some(code),
             }
         }
@@ -305,14 +308,17 @@ impl Authorization {
     }
 
     fn done(&self, code: i32) {
-        let (cancelled, action) = {
+        let (cancelled, action, refused) = {
             let mut inner = self.inner.borrow_mut();
             inner.process = None;
             inner.deadline = None;
-            (inner.cancelled, inner.action.clone())
+            let refused = profile::web_access_blocked(&std::mem::take(&mut inner.errors));
+            (inner.cancelled, inner.action.clone(), refused)
         };
         if cancelled {
             self.finish(tr!("Sign-in cancelled. Your saved session was preserved."));
+        } else if code != 0 && refused {
+            self.finish(profile::web_access_message());
         } else if code != 0 {
             self.finish(tr!(
                 "Sign-in failed. Check your local key, Apple credentials, verification code, and connection, then try again."
@@ -365,6 +371,11 @@ impl Authorization {
     /// Read one setup step: answer what the app knows and ask the user for verification codes and phones.
     fn answered(&self, output: &[u8]) -> Result<(), ()> {
         let data: Value = serde_json::from_slice(output).map_err(|_| ())?;
+        let error = data.get("Error").and_then(Value::as_str).unwrap_or_default();
+        if profile::web_access_blocked(error.as_bytes()) {
+            self.finish(profile::web_access_message());
+            return Ok(());
+        }
         let steps = {
             let mut inner = self.inner.borrow_mut();
             inner.steps += 1;

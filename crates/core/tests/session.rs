@@ -34,7 +34,15 @@ case "$1" in
             shift
         done
         printf '%s' "$device" > "@MARKER@"
-        while [ -e "@MARKER@" ]; do sleep 0.05; done ;;
+        while [ -e "@MARKER@" ]; do
+            # Like rclone, report the refused cookies first, then end the mount.
+            if [ -e "@PCS@" ]; then
+                echo 'requestPCS(fixture): server returned success but cookies still missing: []' >&2
+                rm -f "@MARKER@"
+                exit 1
+            fi
+            sleep 0.05
+        done ;;
     *) exit 92 ;;
 esac
 "#;
@@ -54,6 +62,7 @@ impl Bench {
             .replace("@LOG@", root.path().join("calls.log").to_str().unwrap())
             .replace("@BUSY@", root.path().join("busy").to_str().unwrap())
             .replace("@FAILS@", root.path().join("mount-fails").to_str().unwrap())
+            .replace("@PCS@", root.path().join("pcs-refused").to_str().unwrap())
             .replace("@MARKER@", root.path().join("mounted").to_str().unwrap());
         for name in ["rclone", "fusermount3"] {
             fs::write(bin.join(name), &script).unwrap();
@@ -269,6 +278,24 @@ fn disconnecting_cancels_a_pending_reconnection() {
     );
     bench.session.stop();
     bench.wait(|session| session.state() == State::Disconnected);
+    assert!(!bench.session.reconnecting());
+    assert_eq!(bench.mounts(), 1);
+}
+
+#[test]
+fn an_advanced_data_protection_refusal_explains_web_access_and_is_not_retried() {
+    let bench = Bench::new();
+    bench.session.set_reconnect_delays(&[Duration::ZERO, Duration::ZERO]);
+    bench.connect();
+    fs::write(bench.file("pcs-refused"), "").unwrap();
+    bench.wait(|session| session.state() == State::Error && !session.client_running());
+    for _ in 0..20 {
+        bench.session.tick();
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let message = bench.session.message();
+    assert!(message.contains("Advanced Data Protection"), "{message}");
+    assert!(!message.contains("requestPCS"));
     assert!(!bench.session.reconnecting());
     assert_eq!(bench.mounts(), 1);
 }
