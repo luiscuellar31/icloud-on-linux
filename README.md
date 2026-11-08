@@ -19,9 +19,11 @@ using rclone to reach your account.
 - Download files when you open them and keep a local cache.
 - Reuse your saved session, encrypted with a separate local key.
 - Connect and disconnect from a native desktop window.
+- Upload files with a visible queue, pause and resume, and conflict decisions.
 - List and download files from a terminal through the Docker environment.
 
-The current file manager mount is read-only. Uploads, editing, synchronization,
+The file manager mount is read-only. Uploads use the app queue; select Skip or
+Keep both when a different cloud file already exists. Editing, synchronization,
 and KDE support are planned.
 
 ## Try it

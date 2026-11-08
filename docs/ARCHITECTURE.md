@@ -17,9 +17,12 @@ integration is not implemented yet.
 | [scripts/provision-desktop.sh](../scripts/provision-desktop.sh) | Prepare the dedicated VM desktop and shortcuts using resources from its `cidata` medium. |
 | [crates/app/src/main.rs](../crates/app/src/main.rs) | Start the app for the desktop user; GApplication keeps one running copy and shows its window when opened again. |
 | [crates/app/src/window.rs](../crates/app/src/window.rs) and [view.rs](../crates/app/src/view.rs) | Present the connection status, masked key entry, file manager opening, and safe close; `view.rs` decides what to show and is tested without a display. |
+| [crates/app/src/uploads.rs](../crates/app/src/uploads.rs) | Show the upload queue: the cloud folder for new files, the file dialog, each row's state and progress, and Resume, Pause, Skip, and Keep both. |
 | [scripts/install_desktop.sh](../scripts/install_desktop.sh) | Build the app with Cargo and install it, its helper, and its desktop entry for the current user. |
 | [crates/core/src/session.rs](../crates/core/src/session.rs) | Unlock the saved profile with the local key, mount iCloud Drive read-only through rclone, and disconnect only the app's own mount. |
-| [crates/core](../crates/core) | Rust library for the native app without a user interface: paths, profile and mount checks, translated text, change signals, and child processes that die with the app. |
+| [crates/core/src/uploads.rs](../crates/core/src/uploads.rs) | Own private upload snapshots, durable queue storage, path validation, and local cleanup. |
+| [crates/core/src/transfers.rs](../crates/core/src/transfers.rs) | Prepare files in a worker thread, run one rclone command at a time, verify cloud bytes, and pause or resolve conflicts. |
+| [crates/core](../crates/core) | Rust library for the native app without a user interface: paths, profile and mount checks, the upload queue, translated text, change signals, and child processes that die with the app. |
 
 Provisioning assumes Ubuntu with GNOME, the `icloud` user, and a prepared medium
 containing scripts, the rclone package, and its checksum. It verifies the package
@@ -63,6 +66,73 @@ existing compatible mount from the terminal lab can be opened and disconnected.
 Child processes report through threads and a channel; the window calls the
 session's `tick` every 200 ms to collect results and compare the kernel's mounts.
 
+## Managed uploads
+
+The explorer mount stays read-only. Uploads run through the native app queue.
+Each selected regular file is copied and hashed in a worker thread before any cloud
+write. Its private source directory contains only that payload. The encrypted
+profile and JSON journal stay outside every directory passed to rclone copy.
+
+The queue is saved atomically with file and directory flushes. Interrupted active
+rows reopen paused and require Resume. Each row is bound to the identity of the
+encrypted profile used when it was added, its SHA-256 fingerprint; a different saved
+profile cannot silently receive it. Before a transfer, the snapshot must still
+match its SHA-256.
+
+Every rclone command requires a successful durable queue checkpoint. A failed
+save pauses the queue, stops the active command, and blocks new work until an
+explicit Resume successfully saves the state. A completed or skipped snapshot
+is retained if its terminal state cannot be persisted. Disconnect remains
+available when storage is unavailable.
+Commands start with the process guard: Linux
+[`PR_SET_PDEATHSIG`](https://man7.org/linux/man-pages/man2/PR_SET_PDEATHSIG.2const.html)
+kills an active transfer if the app dies, and the child checks that its parent is
+still the app after arming it, which closes the startup race. A failed guard setup
+starts no rclone command. Commands start from the main thread, to which the kernel
+ties that signal; the preparation worker starts none. The window calls the queue's
+`tick` every 100 ms, and active commands also trigger a checkpoint about once per
+second. Connection ownership and profile identity are checked again after each
+checkpoint, before the next command starts. A newly connected profile cannot claim
+old pending rows or apply Keep both to another profile.
+
+Each ready snapshot also has a private `upload.json` outside its data directory.
+Startup recovers ready snapshots missing from the queue as paused rows. Incomplete
+preparation directories without that record are preserved and reported; they
+cannot upload automatically. A partial batch retains its ready snapshots.
+If preparing another batch fails, an already active upload is stopped as well;
+the queue never reports a paused transfer while allowing its child to continue.
+
+Keep both changes the journal destination while keeping the snapshot filename
+stable. When needed, a private `send/` directory contains a hard link under the
+new destination name. Only that one-file directory is copied. Failed checkpoints
+and crashes cannot detach the queue from its payload by renaming it first.
+
+The reader accepts journal versions 1 and 2 without moving payloads or rewriting
+the queue at startup. A pending version 1 row can recover its sole renamed file;
+the normal background hash check still applies before any cloud command. Saves
+use version 2, which records the stable source filename.
+
+An independent remote stat and download detect existing equal or conflicting
+content. Matching bytes finish without another upload. Different bytes require
+Skip or Keep both, which chooses a new random filename. Missing files use
+directory copy with `--immutable --ignore-times`; the single-file copy path in
+rclone 1.75.2 bypasses that protection. Success requires an independent SHA-256
+download check before releasing the snapshot. Network errors retain local data.
+Disconnect pauses the queue and waits for its command to stop before unmounting
+and releasing the unlocked session; closing the app and the end of the desktop
+session do the same before the window closes. Cloud mutations are never used for
+cleanup of ordinary queue items.
+
+These checks do not provide a server transaction against another writer creating
+or changing the same name simultaneously. The app serializes its own uploads;
+shared editing and automatic replacement need a stronger backend conflict model.
+The tested [rclone iCloud backend](https://github.com/rclone/rclone/blob/v1.75.2/backend/iclouddrive/iclouddrive.go)
+can resolve an existing object again in Put and replace it in Update, leaving a
+gap after the client check. Local tests cover a competing file before copy and
+same-size, shorter, and longer edits before verification; they do not establish
+an atomic create-if-absent guarantee. A mismatched download becomes Conflict,
+including a stream that grows beyond the expected size, and retains the snapshot.
+
 ## Mount and desktop integration
 
 The user **iCloud on Linux** shortcut runs the native app. Its Connect action
@@ -96,6 +166,7 @@ with iCloud as the source and a local destination.
 | Ubuntu | rclone VFS cache, under the user cache directory | Contents of opened files; configuration encryption does not encrypt these copies. |
 | Linux desktop | `~/.cache/icloud-on-linux/vfs/`, or the equivalent under `XDG_CACHE_HOME` | The native app's VFS cache, with the same contents and limits. |
 | Linux desktop | `$XDG_RUNTIME_DIR/icloud-on-linux/session-*/` | Private copy of the encrypted profile while connected, removed on disconnect. The runtime directory is in memory and is cleared when the user logs out. |
+| Linux desktop | `~/.cache/icloud-on-linux/uploads/`, or the equivalent under `XDG_CACHE_HOME` | Private unencrypted payload snapshots and a `0600` journal containing filenames, destinations, hashes, profile fingerprints, and state. Pending copies survive disconnect and restart. |
 | Linux desktop | `~/.local/bin/icloud-on-linux` and `~/.local/share/icloud-on-linux/` | User installation of the app and its helper; the desktop entry is under `~/.local/share/applications/`. |
 | Host | `.vm/` | Disk, identifier, installation media, keys, and administration data for the local VM. Excluded from Git and the Docker build context. |
 | Host | `downloads/` | Personal copies extracted from the container. Excluded from Git and the Docker build context. |
@@ -109,9 +180,15 @@ Dockerfile and the session script needed by the image to the builder.
 
 - [crates/core/tests](../crates/core/tests): the native session with local stand-ins
   for rclone and FUSE, and on Linux a real read-only FUSE mount of a fictional
-  encrypted profile. [crates/app/tests/visible.rs](../crates/app/tests/visible.rs)
-  connects, opens the file manager, and disconnects in the visible window on a
-  Wayland display.
+  encrypted profile. [crates/core/tests/uploads.rs](../crates/core/tests/uploads.rs)
+  runs the upload queue with the real rclone against local fictional remotes:
+  verification, Keep both and Skip, interrupted uploads and crashes, a WebDAV
+  outage, a changed profile, and cloud edits before the copy or during verification.
+- [crates/app/tests/visible](../crates/app/tests/visible): the visible window on a
+  Wayland or X11 display. It uploads files and decides a conflict with Keep both,
+  disconnects during an upload and resumes it after reconnecting, and ends the app
+  during an upload. Then, in a new window, it connects, opens the file manager,
+  and disconnects.
 - [tests/test_launchers.py](../tests/test_launchers.py): Docker launch, session
   creation and reuse, errors, and key handling through local stand-ins.
 - [tests/test_vm_launcher.py](../tests/test_vm_launcher.py): VM identifier validation

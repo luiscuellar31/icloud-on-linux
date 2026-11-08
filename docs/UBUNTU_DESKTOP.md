@@ -65,6 +65,36 @@ folder. Closing the connected app asks whether to disconnect and close it. An
 existing read-only mount from the terminal lab can be opened or disconnected
 without entering a key.
 
+## Upload files
+
+The file manager folder stays read-only; uploads go through the app queue.
+
+1. Connect inside the native app with your local key. If the app adopted an older
+   terminal mount, disconnect it first and reconnect here to unlock uploads.
+2. Expand **Uploads** and enter a folder relative to iCloud Drive in **Upload to**,
+   such as `Documents/Uploads`. The default is `iCloud on Linux uploads`; missing
+   folders are created.
+3. Select **Add files...**, or **Upload files...** in the menu, and choose regular
+   files. The app prepares private local copies and shows each row as Checking,
+   Uploading, Verifying, or Completed.
+4. For **Conflict**, select the row and choose **Skip** or **Keep both**. Keep both
+   uses a new filename; there is no replacement action. The status shows
+   **Review needed** until you decide.
+
+**Pause uploads** retains pending copies. **Resume uploads** rechecks the cloud
+before retrying paused or failed rows. Restarted queues stay paused until you
+connect and resume them. Disconnect and closing the app pause an active upload
+before closing its connection. Files in another saved profile stay paused.
+
+Completed means a separate cloud download matched the local snapshot SHA-256.
+Verification uses download bandwidth. New uploads become visible in the explorer
+after its directory cache refreshes, normally within ten seconds on the app mount.
+The app does not yet synchronize edits made inside the explorer folder.
+
+Pending payloads and opened files are stored unencrypted in your private user
+cache. Keep enough free disk space and preserve that cache when recovering a
+pending upload. Configuration encryption protects the session, not file contents.
+
 ## 1. Open Ubuntu Desktop
 
 If you already have an Ubuntu Desktop VM, continue with step 2. The iCloud

@@ -1,4 +1,4 @@
-//! The main window: the connection status, the local key, and opening iCloud Drive in the file manager.
+//! The main window: the connection status, the local key, opening iCloud Drive in the file manager, and uploads.
 use std::cell::Cell;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
@@ -9,12 +9,14 @@ use icloud_core::connection::Connection;
 use icloud_core::session::{Session, State};
 use icloud_core::tr;
 
+use crate::uploads::Uploads;
 use crate::view::{self, Facts, Tone};
 
-const TONES: [Tone; 4] = [Tone::Ok, Tone::Busy, Tone::Error, Tone::Off];
+const TONES: [Tone; 5] = [Tone::Ok, Tone::Busy, Tone::Warning, Tone::Error, Tone::Off];
 
 pub struct Window {
     pub window: adw::ApplicationWindow,
+    pub uploads: Rc<Uploads>,
     session: Rc<Session>,
     dot: gtk::Label,
     status: gtk::Label,
@@ -28,12 +30,14 @@ pub struct Window {
     disconnect: gio::SimpleAction,
     quit: gio::SimpleAction,
     closing: Cell<bool>,
+    /// Disconnect waits for uploads to stop, because they use the unlocked connection.
+    disconnect_pending: Cell<bool>,
 }
 
-/// Run `action` if the window still exists; closures keep only weak references so the window can be freed.
-fn with(window: &Weak<Window>, action: impl FnOnce(&Rc<Window>)) {
-    if let Some(window) = window.upgrade() {
-        action(&window);
+/// Run `action` if the part still exists; closures keep only weak references so the window can be freed.
+pub(crate) fn with<T>(part: &Weak<T>, action: impl FnOnce(&Rc<T>)) {
+    if let Some(part) = part.upgrade() {
+        action(&part);
     }
 }
 
@@ -95,6 +99,7 @@ impl Window {
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         actions.append(&open);
         actions.append(&cancel);
+        let uploads = Uploads::new(&session);
 
         let content = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -110,13 +115,21 @@ impl Window {
             progress.upcast_ref(),
             key_panel.upcast_ref(),
             actions.upcast_ref(),
+            uploads.widget().upcast_ref(),
         ] {
             content.append(part);
         }
 
         let menu = gio::Menu::new();
-        menu.append(Some(&tr!("Disconnect")), Some("win.disconnect"));
-        menu.append(Some(&tr!("Quit")), Some("win.quit"));
+        if uploads.transfers().is_some() {
+            let files = gio::Menu::new();
+            files.append(Some(&tr!("Upload files...")), Some("win.upload"));
+            menu.append_section(None, &files);
+        }
+        let connection = gio::Menu::new();
+        connection.append(Some(&tr!("Disconnect")), Some("win.disconnect"));
+        connection.append(Some(&tr!("Quit")), Some("win.quit"));
+        menu.append_section(None, &connection);
         let menu_button = gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
             .menu_model(&menu)
@@ -142,9 +155,11 @@ impl Window {
         let quit = gio::SimpleAction::new("quit", None);
         window.add_action(&disconnect);
         window.add_action(&quit);
+        window.add_action(&uploads.action);
 
         let this = Rc::new(Window {
             window,
+            uploads,
             session,
             dot,
             status,
@@ -158,6 +173,7 @@ impl Window {
             disconnect,
             quit,
             closing: Cell::new(false),
+            disconnect_pending: Cell::new(false),
         });
         this.connect_signals();
         this.render();
@@ -180,12 +196,20 @@ impl Window {
         let weak = Rc::downgrade(self);
         self.open
             .connect_clicked(move |_| with(&weak, |window| window.open_folder()));
+        if let Some(transfers) = self.uploads.transfers() {
+            let weak = Rc::downgrade(self);
+            transfers.changed.connect(move || with(&weak, |window| window.render()));
+            let weak = Rc::downgrade(self);
+            transfers
+                .idle
+                .connect(move || with(&weak, |window| window.uploads_idle()));
+        }
         let weak = Rc::downgrade(self);
         self.cancel
-            .connect_clicked(move |_| with(&weak, |window| window.session.stop()));
+            .connect_clicked(move |_| with(&weak, |window| window.disconnect_session()));
         let weak = Rc::downgrade(self);
         self.disconnect
-            .connect_activate(move |_, _| with(&weak, |window| window.session.stop()));
+            .connect_activate(move |_, _| with(&weak, |window| window.disconnect_session()));
         let weak = Rc::downgrade(self);
         self.quit
             .connect_activate(move |_, _| with(&weak, |window| window.window.close()));
@@ -226,6 +250,8 @@ impl Window {
             checking: self.session.checking(),
             owns_mount: self.session.owns_mount(),
             key_typed: typed(&self.key),
+            uploads: self.uploads.status(),
+            disconnect_pending: self.disconnect_pending.get(),
         };
         let screen = view::screen(&facts);
         self.status.set_label(&screen.status);
@@ -241,8 +267,10 @@ impl Window {
         self.open.set_visible(screen.open_visible);
         self.open.set_sensitive(screen.open);
         self.cancel.set_visible(screen.cancel);
+        self.cancel.set_sensitive(screen.cancel_enabled);
         self.disconnect.set_enabled(screen.disconnect);
-        if self.closing.get() && !self.session.busy() {
+        self.uploads.render(self.disconnect_pending.get());
+        if self.closing.get() && !self.session.busy() && !self.disconnect_pending.get() {
             if self.session.running() || mount.is_some() {
                 // Disconnecting failed, for example because a file is open; the status explains it.
                 self.closing.set(false);
@@ -282,8 +310,23 @@ impl Window {
         });
     }
 
+    /// Pause uploads, then disconnect once they have stopped.
+    fn disconnect_session(&self) {
+        self.disconnect_pending.set(true);
+        self.uploads.pause();
+        self.uploads_idle();
+        self.render();
+    }
+
+    fn uploads_idle(&self) {
+        if self.disconnect_pending.get() && !self.uploads.busy() {
+            self.disconnect_pending.set(false);
+            self.session.stop();
+        }
+    }
+
     fn active(&self) -> bool {
-        self.session.running() || self.session.owns_mount()
+        self.session.running() || self.session.owns_mount() || self.uploads.busy()
     }
 
     fn close_request(self: &Rc<Self>) -> glib::Propagation {
@@ -309,12 +352,11 @@ impl Window {
         glib::Propagation::Stop
     }
 
-    /// Disconnect if needed, then close; `render` finishes once the connection has stopped.
+    /// Pause uploads and disconnect if needed, then close; `render` finishes once everything has stopped.
     fn shut_down(&self) {
         if self.active() {
             self.closing.set(true);
-            self.session.stop();
-            self.render();
+            self.disconnect_session();
         } else {
             self.window.destroy();
         }

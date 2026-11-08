@@ -1,12 +1,14 @@
 //! The encrypted rclone profile, private folders, and the kernel's view of mounts.
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufRead, BufReader, Write};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+use nix::fcntl::OFlag;
 use regex::Regex;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{Failure, Result, tr};
@@ -120,6 +122,40 @@ pub fn random_hex() -> std::io::Result<String> {
     Ok(hex(&bytes))
 }
 
+/// Replace `path` with `value` as JSON, atomically and durably: write a private temporary file beside it, flush it,
+/// rename it over `path`, and flush the folder. A failure leaves the previous file and no temporary one.
+pub fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
+    let mut name = path.file_name().unwrap_or_default().to_owned();
+    name.push(format!("-{}", random_hex()?));
+    let temporary = path.with_file_name(name);
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(&serde_json::to_vec(value)?)?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)?;
+        flush_directory(
+            path.parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(Path::new(".")),
+        )
+    })();
+    let _ = fs::remove_file(&temporary);
+    result
+}
+
+/// Flush a folder, so that files created or renamed in it survive a crash.
+pub fn flush_directory(path: &Path) -> io::Result<()> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(OFlag::O_DIRECTORY.bits())
+        .open(path)?;
+    Ok(nix::unistd::fsync(&directory)?)
+}
+
 /// The identity of a profile: its SHA-256, or the identity it inherited when a renewal replaced it.
 pub fn profile_identity(path: &Path, digest: Option<String>) -> Result<String> {
     let digest = match digest {
@@ -223,6 +259,26 @@ mod tests {
         assert_eq!(profile_identity(&profile, None).unwrap(), original);
         fs::write(&links, r#"{"version": 1, "profiles": {"short": "value"}}"#).unwrap();
         assert!(profile_identity(&profile, None).is_err());
+    }
+
+    #[test]
+    fn json_replaces_a_file_privately_and_a_failure_leaves_no_temporary_file() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("state.json");
+        write_json(&path, &serde_json::json!({"version": 1})).unwrap();
+        write_json(&path, &serde_json::json!({"version": 2})).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), r#"{"version":2}"#);
+        assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+        // A folder in place of the file makes the rename fail after the temporary file was written.
+        let blocked = root.path().join("blocked.json");
+        fs::create_dir(&blocked).unwrap();
+        assert!(write_json(&blocked, &serde_json::json!({})).is_err());
+        let mut names: Vec<_> = fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["blocked.json", "state.json"]);
     }
 
     #[test]

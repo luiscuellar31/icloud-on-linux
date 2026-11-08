@@ -20,4 +20,5 @@ tempfile.workspace = true
 # GTK runs on the thread that started it, so this check has its own main function.
 [[test]]
 name = "visible"
+path = "tests/visible/main.rs"
 harness = false

@@ -79,13 +79,19 @@ cargo clippy --all-targets
 cargo test
 ```
 
-Run the tests on Linux as well: process protection and mount checks depend on it.
+Run the tests on Linux as well: process protection, mounts, and uploads depend on
+it. There, the upload queue runs the real rclone against local fictional remotes:
+verification by download, Keep both and Skip, interrupted and recovered uploads, a
+backend outage, a changed profile, cloud edits during an upload, and crashes.
+
 Keep `unsafe` code out of the crates except where a system call requires it, and
 explain each such block in a `SAFETY` comment.
 
-When `WAYLAND_DISPLAY` is set, as in a Wayland desktop session, `cargo test` also
-runs the visible window check: it connects a fictional encrypted profile and
-disconnects. To also click Open and wait for the file manager, run:
+When `WAYLAND_DISPLAY` or `DISPLAY` is set, as in a desktop session, `cargo test`
+also runs the visible window check with a fictional encrypted profile. It uploads
+files and decides a conflict, disconnects during an upload and resumes it after
+reconnecting, and ends the app during an upload. Then, in a new window, it connects
+and disconnects. To also click Open and wait for the file manager, run:
 
 ```sh
 cargo test --package icloud-on-linux --test visible -- --expect-file-manager nautilus

@@ -9,6 +9,8 @@ pub mod process;
 pub mod profile;
 pub mod session;
 pub mod signal;
+pub mod transfers;
+pub mod uploads;
 
 use std::fmt;
 use std::io;
