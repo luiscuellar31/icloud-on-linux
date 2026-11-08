@@ -34,6 +34,21 @@ pub enum State {
 }
 
 impl State {
+    /// The English name, for reports.
+    pub fn name(self) -> &'static str {
+        match self {
+            State::Queued => "Queued",
+            State::Checking => "Checking",
+            State::Uploading => "Uploading",
+            State::Verifying => "Verifying",
+            State::Completed => "Completed",
+            State::Paused => "Paused",
+            State::Conflict => "Conflict",
+            State::Skipped => "Skipped",
+            State::Error => "Error",
+        }
+    }
+
     /// Whether the queue is working on the row. Such rows pause with the queue and reopen paused.
     pub fn active(self) -> bool {
         matches!(

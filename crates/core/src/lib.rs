@@ -5,6 +5,7 @@
 pub mod auth;
 pub mod autostart;
 pub mod connection;
+pub mod diagnostics;
 pub mod i18n;
 pub mod keyring;
 pub mod paths;

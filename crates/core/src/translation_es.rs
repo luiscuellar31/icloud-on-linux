@@ -79,6 +79,17 @@ pub static SPANISH: &[(&str, &str)] = &[
     ),
     ("Language", "Idioma"),
     ("Automatic", "Automático"),
+    ("Save diagnostic report...", "Guardar diagnóstico..."),
+    ("Save diagnostic report", "Guardar diagnóstico"),
+    ("Text files (*.txt)", "Archivos de texto (*.txt)"),
+    (
+        "The report could not be saved. Choose another folder.",
+        "No se pudo guardar el reporte. Elige otra carpeta.",
+    ),
+    (
+        "Report saved. It has no keys, tokens, file contents, or file and folder names, so you can share it.",
+        "Reporte guardado. No incluye claves, tokens, contenido de archivos ni nombres de archivos o carpetas, así que puedes compartirlo.",
+    ),
     ("Disconnect", "Desconectar"),
     ("Quit", "Salir"),
     (

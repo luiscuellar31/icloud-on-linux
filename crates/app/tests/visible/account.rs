@@ -92,6 +92,8 @@ pub fn check(app: &App, fixture: &Fixture) {
     assert!(transfers.items().iter().any(|item| item.state == Row::Paused));
     ui::connect(&app.window(), session);
     let kept = sync_docs(app, fixture);
+    // A synced folder and named uploads are what the diagnostic report must describe without naming.
+    crate::report::check(app, fixture);
     settings.set_apple_signed_in_at(1_800_000_000).unwrap();
     let listed = [
         "1 pending upload(s)",

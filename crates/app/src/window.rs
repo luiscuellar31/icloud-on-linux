@@ -2,16 +2,19 @@
 //! and uploads. It shows the app's parts, which keep running when a window in another language replaces it, and while
 //! the window is closed to the tray.
 use std::cell::RefCell;
-use std::fs;
+use std::path::Path;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{env, fs, io};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
 use icloud_core::connection::Connection;
+use icloud_core::diagnostics::{self, System};
 use icloud_core::session::{Session, State};
+use icloud_core::sync::Review;
 use icloud_core::uploads::State as UploadState;
-use icloud_core::{i18n, profile, settings, tr};
+use icloud_core::{i18n, paths, profile, settings, tr};
 
 use crate::app::{App, Parts, SignOut};
 use crate::folders::Folders;
@@ -47,6 +50,7 @@ pub struct Window {
     login: gio::SimpleAction,
     unlock: gio::SimpleAction,
     language: gio::SimpleAction,
+    report: gio::SimpleAction,
     disconnect: gio::SimpleAction,
     quit: gio::SimpleAction,
     sign_in: RefCell<Weak<SignIn>>,
@@ -195,6 +199,7 @@ impl Window {
         preferences.append(Some(&tr!("Start at login")), Some("win.login"));
         preferences.append(Some(&tr!("Unlock automatically on this computer")), Some("win.unlock"));
         preferences.append_submenu(Some(&tr!("Language")), &languages);
+        preferences.append(Some(&tr!("Save diagnostic report...")), Some("win.report"));
         menu.append_section(None, &preferences);
         let connection = gio::Menu::new();
         connection.append(Some(&tr!("Disconnect")), Some("win.disconnect"));
@@ -244,10 +249,12 @@ impl Window {
             &parts.language.get().to_variant(),
         );
         window.add_action(&language);
+        let report = gio::SimpleAction::new("report", None);
         let disconnect = gio::SimpleAction::new("disconnect", None);
         let quit = gio::SimpleAction::new("quit", None);
-        window.add_action(&disconnect);
-        window.add_action(&quit);
+        for action in [&report, &disconnect, &quit] {
+            window.add_action(action);
+        }
         window.add_action(&uploads.action);
 
         let this = Rc::new(Window {
@@ -275,6 +282,7 @@ impl Window {
             login,
             unlock,
             language,
+            report,
             disconnect,
             quit,
             sign_in: RefCell::new(Weak::new()),
@@ -327,6 +335,9 @@ impl Window {
         let weak = Rc::downgrade(self);
         self.cancel
             .connect_clicked(move |_| with(&weak, |window| window.disconnect_session()));
+        let weak = Rc::downgrade(self);
+        self.report
+            .connect_activate(move |_, _| with(&weak, |window| window.save_report()));
         let weak = Rc::downgrade(self);
         self.disconnect
             .connect_activate(move |_, _| with(&weak, |window| window.disconnect_session()));
@@ -688,6 +699,137 @@ impl Window {
                 with(&weak, |window| window.sign_in());
             }
         });
+    }
+
+    /// Ask where to save the diagnostic report, then save it there and say whether that worked.
+    fn save_report(self: &Rc<Self>) {
+        let name = match glib::DateTime::now_local().and_then(|now| now.format("%Y-%m-%d")) {
+            Ok(date) => format!("icloud-on-linux-report-{date}.txt"),
+            Err(_) => "icloud-on-linux-report.txt".to_owned(),
+        };
+        let text = gtk::FileFilter::new();
+        text.set_name(Some(&tr!("Text files (*.txt)")));
+        text.add_pattern("*.txt");
+        let filters = gio::ListStore::new::<gtk::FileFilter>();
+        filters.append(&text);
+        let dialog = gtk::FileDialog::builder()
+            .title(tr!("Save diagnostic report"))
+            .initial_folder(&gio::File::for_path(paths::home()))
+            .initial_name(name)
+            .filters(&filters)
+            .default_filter(&text)
+            .modal(true)
+            .build();
+        let weak = Rc::downgrade(self);
+        dialog.save(Some(&self.window), gio::Cancellable::NONE, move |result| {
+            // Cancelling the dialog, or a place without a local path, saves nothing.
+            let Some(path) = result.ok().and_then(|file| file.path()) else {
+                return;
+            };
+            with(&weak, |window| {
+                let body = match window.write_report(&path) {
+                    Ok(()) => tr!(
+                        "Report saved. It has no keys, tokens, file contents, or file and folder names, so you can share it."
+                    ),
+                    Err(_) => tr!("The report could not be saved. Choose another folder."),
+                };
+                let note = adw::AlertDialog::builder()
+                    .heading(tr!("Save diagnostic report"))
+                    .body(body)
+                    .build();
+                note.add_responses(&[("close", &tr!("Close"))]);
+                note.present(Some(&window.window));
+            })
+        });
+    }
+
+    /// Save the diagnostic report to `path`: versions, settings, and states, without keys, tokens, file contents, or
+    /// file and folder names.
+    pub fn write_report(&self, path: &Path) -> io::Result<()> {
+        let (parts, session) = (&self.parts, &self.session);
+        let words = |on: bool, yes: &str, no: &str| if on { yes } else { no }.to_owned();
+        let tray = self.app.upgrade().is_some_and(|app| app.tray_shown());
+        let age = parts.settings.apple_signed_in_at().map_or_else(
+            || "unknown".to_owned(),
+            |at| format!("{:.0} days", (now() - at) as f64 / 86_400.0),
+        );
+        let details = [
+            ("Version", env!("CARGO_PKG_VERSION").to_owned()),
+            (
+                "GTK",
+                format!(
+                    "{}.{}.{}",
+                    gtk::major_version(),
+                    gtk::minor_version(),
+                    gtk::micro_version()
+                ),
+            ),
+            (
+                "libadwaita",
+                format!(
+                    "{}.{}.{}",
+                    adw::major_version(),
+                    adw::minor_version(),
+                    adw::micro_version()
+                ),
+            ),
+            (
+                "Language",
+                format!("{} (showing {})", parts.language.get(), i18n::current()),
+            ),
+            ("Tray icon", words(tray, "available", "not available")),
+            ("Start at login", words(parts.autostart.borrow().enabled(), "on", "off")),
+            (
+                "Unlock automatically",
+                words(parts.unlocks_automatically(), "on", "off"),
+            ),
+            (
+                "Keyring tool",
+                words(parts.keyring.borrow().is_some(), "available", "not installed"),
+            ),
+            ("Apple session age", age),
+        ]
+        .map(|(label, value)| (label.to_owned(), value));
+        let connection = diagnostics::Connection {
+            saved_session: parts.signed_in(),
+            state: session.state().name(),
+            message: session.message(),
+            owns_mount: session.owns_mount(),
+            reconnecting: session.reconnecting(),
+        };
+        let folders = parts.sync.as_ref().map(|sync| diagnostics::Folders {
+            folders: sync
+                .folders()
+                .iter()
+                .map(|folder| diagnostics::Folder {
+                    state: folder.state.name(),
+                    items: folder.items(),
+                    pending: folder.pending,
+                    conflicts: folder.conflicts,
+                    review: folder.attention.map(Review::name),
+                    message: folder.message.clone(),
+                })
+                .collect(),
+            message: sync.message(),
+        });
+        let uploads = parts.transfers.as_ref().map(|transfers| diagnostics::Uploads {
+            states: transfers.items().iter().map(|item| item.state.name()).collect(),
+            storage_problem: transfers.storage_error(),
+            messages: vec![transfers.message(), transfers.recovery_warning()],
+        });
+        let system = System::detect(&env::current_exe().unwrap_or_default());
+        let home = paths::home();
+        fs::write(
+            path,
+            diagnostics::report(
+                &system,
+                &details,
+                &connection,
+                folders.as_ref(),
+                uploads.as_ref(),
+                &home.to_string_lossy(),
+            ),
+        )
     }
 
     fn connect_session(&self) {

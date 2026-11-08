@@ -78,6 +78,19 @@ pub enum State {
 }
 
 impl State {
+    /// The English name, for reports.
+    pub fn name(self) -> &'static str {
+        match self {
+            State::Waiting => "Waiting",
+            State::Paused => "Paused",
+            State::Syncing => "Syncing",
+            State::ChangesPending => "Changes pending",
+            State::UpToDate => "Up to date",
+            State::NeedsReview => "Needs review",
+            State::Error => "Error",
+        }
+    }
+
     /// The state's name in the current language.
     pub fn label(self) -> String {
         match self {
@@ -99,6 +112,16 @@ pub enum Review {
     Confirm,
     /// A side is empty or the sync history is missing: a copy-only run restores the pair.
     Repair,
+}
+
+impl Review {
+    /// The English name, for reports.
+    pub fn name(self) -> &'static str {
+        match self {
+            Review::Confirm => "confirm",
+            Review::Repair => "repair",
+        }
+    }
 }
 
 /// An iCloud Drive folder and its local copy. The first five fields are saved; the others describe this session.

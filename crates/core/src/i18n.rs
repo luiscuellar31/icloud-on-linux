@@ -59,6 +59,15 @@ pub fn resolve(choice: &str, desktop: &[String]) -> &'static str {
         .unwrap_or("en")
 }
 
+/// The language that text is shown in now.
+pub fn current() -> &'static str {
+    if SHOW_SPANISH.load(Ordering::Relaxed) {
+        "es"
+    } else {
+        "en"
+    }
+}
+
 /// Show later text in the language for `choice`, and return that language.
 pub fn apply(choice: &str) -> &'static str {
     let language = resolve(choice, &DESKTOP);
