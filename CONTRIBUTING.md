@@ -37,7 +37,7 @@ explicit request from the maintainer; preparing a change does not authorize eith
   typographic quotation marks in prose; preserve quoting required by code syntax.
 - Verify external tool options against the code, installed version, or official
   documentation before changing them. Keep the tested rclone version consistent
-  across Docker, Ubuntu, and the guides.
+  across Docker, Ubuntu, the packages, and the guides.
 - Documentation must have lasting value. Extend an existing document before
   adding another; keep session logs and temporary reports outside the repository.
 
@@ -105,6 +105,46 @@ profiles. It checks that the password is saved obscured inside the encrypted
 copy, that renewal reads the saved account and refuses another one, and that the
 copy is removed. It stops before the answer that would contact Apple; a real
 sign-in requires the maintainer's account.
+
+For packaging or distribution changes, build the `.deb` and `.rpm` with native
+tools in disposable containers, then install and check them:
+
+```sh
+packaging/build.sh
+tests/check_packages.sh
+```
+
+Packages land in the ignored `dist/` directory, built for the host architecture.
+Debian 13 packages an older Rust than the GTK bindings need, so the `.deb` is built
+in the official Rust 1.92 image based on Debian 13; the `.rpm` is built in Fedora
+45 with its own Rust. The check builds the test programs once in that Debian image,
+then defaults to `debian:13 ubuntu:24.04 ubuntu:26.04 fedora:45`; pass other images
+as arguments. Containers receive only tracked sources, the packages, and those
+programs, never `.vm/` or `downloads/`. Each installs the package with rclone
+1.75.2 (the verified official package on Debian and Ubuntu) and runs as an
+unprivileged user with the installed helper: the Rust tests, including a real FUSE
+mount and the real rclone sign-in steps; the visible window under headless Weston,
+where Open must start a stand-in file manager; and the installed app, which must
+close on SIGTERM. Containers get `/dev/fuse` and `SYS_ADMIN` for the private
+mounts. Compiling the GTK bindings takes up to 2 GB of memory per job; with less,
+set `CARGO_BUILD_JOBS=1` before running both scripts.
+
+To check the real GNOME and KDE Wayland compositors, run this in the dedicated VM
+as a separate test user that can read the checkout, with `gnome-shell`,
+`kwin-wayland`, Nautilus, and Dolphin installed:
+
+```sh
+cargo test --package icloud-on-linux --test visible --no-run
+tests/check_wayland.sh gnome target/debug/deps/visible-HASH
+tests/check_wayland.sh kde target/debug/deps/visible-HASH
+```
+
+The first command prints the program path after `Executable tests/visible/main.rs`;
+build it as your own user if the test user has no Rust toolchain. Each run starts
+a headless compositor without X11 in a private D-Bus session and a temporary home,
+selects that desktop's file manager, and requires its process to appear after
+Open. It stops the processes it started, unmounts any fixture mount left by a
+failed check, and removes that home.
 
 For container or shared session changes, build the image:
 

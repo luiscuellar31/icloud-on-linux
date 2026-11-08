@@ -15,7 +15,7 @@ using rclone to reach your account.
 ## Features
 
 - Sign in with your Apple account and two-factor authentication.
-- Browse iCloud Drive in GNOME Files and open files with your usual apps.
+- Browse iCloud Drive in GNOME Files or KDE Dolphin and open files with your usual apps.
 - Download files when you open them and keep a local cache.
 - Reuse your saved session, encrypted with a separate local key.
 - Connect and disconnect from a native desktop window, and sign in or renew the
@@ -24,8 +24,8 @@ using rclone to reach your account.
 - List and download files from a terminal through the Docker environment.
 
 The file manager mount is read-only. Uploads use the app queue; select Skip or
-Keep both when a different cloud file already exists. Editing, synchronization,
-and KDE support are planned.
+Keep both when a different cloud file already exists. Editing and synchronization
+are planned.
 
 ## Try it
 
@@ -33,7 +33,36 @@ and KDE support are planned.
 
 The [Ubuntu Desktop guide](docs/UBUNTU_DESKTOP.md) walks through installing rclone,
 signing in, and opening iCloud Drive as the folder `~/iCloud` in Files. The tested
-setup is Ubuntu 24.04 with GNOME.
+desktop stacks are GNOME 46 and KDE Plasma 5.27 on Ubuntu 24.04, on Wayland; the
+window is also checked on X11.
+
+### Fedora, Debian, and Ubuntu packages
+
+With Docker running, build the packages for your computer's architecture from a
+checkout:
+
+```sh
+packaging/build.sh
+```
+
+On Fedora 45, install the `.rpm`; its dependencies, including rclone, come from the
+Fedora repositories:
+
+```sh
+sudo dnf install ./dist/icloud-on-linux-*.rpm
+```
+
+On Debian 13, Ubuntu 24.04, or Ubuntu 26.04, first install the official rclone
+1.75.2 package with its checksum, as in step 2 of the
+[Ubuntu Desktop guide](docs/UBUNTU_DESKTOP.md); the distribution rclone lacks the
+iCloud backend. Then install the `.deb`:
+
+```sh
+sudo apt install ./dist/icloud-on-linux_*.deb
+```
+
+Open **iCloud on Linux** from the applications menu and select **Sign in to iCloud**.
+Packages are checked in containers without a full desktop session.
 
 ### Docker
 
@@ -57,7 +86,7 @@ the [Docker guide](docs/DOCKER.md) for the commands and download steps.
 
 - Upload, edit, move, and delete files from the file manager.
 - Keep folders in sync and handle conflicts and interrupted connections.
-- Package and test the app for Ubuntu, Fedora, and Debian with GNOME and KDE.
+- Publish release packages and test full Fedora and Debian desktop sessions.
 
 ## Documentation and contributions
 

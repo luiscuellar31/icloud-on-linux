@@ -2,8 +2,10 @@
 
 The project uses rclone 1.75.2 to access iCloud Drive from Linux. It provides a
 Docker terminal lab, a read-only FUSE mount on Ubuntu 24.04 with GNOME, and a native
-app written in Rust with GTK4 and libadwaita that controls that mount. KDE
-integration is not implemented yet.
+app written in Rust with GTK4 and libadwaita that controls that mount. The visible
+app is checked with GNOME 46 and KDE Plasma 5.27 on headless Wayland compositors.
+Its `.deb` and `.rpm` packages are checked in Debian 13, Ubuntu 24.04, Ubuntu 26.04,
+and Fedora 45 containers.
 
 ## Components
 
@@ -19,6 +21,10 @@ integration is not implemented yet.
 | [crates/app/src/window.rs](../crates/app/src/window.rs) and [view.rs](../crates/app/src/view.rs) | Present the connection status, masked key entry, file manager opening, and safe close; `view.rs` decides what to show and is tested without a display. |
 | [crates/app/src/uploads.rs](../crates/app/src/uploads.rs) | Show the upload queue: the cloud folder for new files, the file dialog, each row's state and progress, and Resume, Pause, Skip, and Keep both. |
 | [scripts/install_desktop.sh](../scripts/install_desktop.sh) | Build the app with Cargo and install it, its helper, and its desktop entry for the current user. |
+| [packaging/build.sh](../packaging/build.sh) | Build the `.deb` and `.rpm` with Cargo, `dpkg-deb`, and `rpmbuild` in disposable Debian 13 and Fedora 45 containers. |
+| [packaging/stage.sh](../packaging/stage.sh) | Install the app, session helper, and desktop entry into a package root shared by both formats. |
+| [packaging/control](../packaging/control) and [packaging/icloud-on-linux.spec](../packaging/icloud-on-linux.spec) | Declare package metadata and dependencies. |
+| [packaging/io.github.luiscuellar31.IcloudOnLinux.desktop](../packaging/io.github.luiscuellar31.IcloudOnLinux.desktop) | Desktop entry for the packaged and user installations. |
 | [crates/core/src/auth.rs](../crates/core/src/auth.rs) and [crates/app/src/signin.rs](../crates/app/src/signin.rs) | Run the sign-in steps on a private profile copy, answer setup questions, check access, and publish the profile; the dialog collects the key, Apple account, password, and verification answers. |
 | [crates/core/src/session.rs](../crates/core/src/session.rs) | Unlock the saved profile with the local key, mount iCloud Drive read-only through rclone, and disconnect only the app's own mount. |
 | [crates/core/src/uploads.rs](../crates/core/src/uploads.rs) | Own private upload snapshots, durable queue storage, path validation, and local cleanup. |
@@ -172,6 +178,26 @@ same-size, shorter, and longer edits before verification; they do not establish
 an atomic create-if-absent guarantee. A mismatched download becomes Conflict,
 including a stream that grows beyond the expected size, and retains the snapshot.
 
+## Packages
+
+The `.deb` and `.rpm` are built for one architecture and contain the app binary,
+`session.sh` under `/usr/share/icloud-on-linux/`, and the desktop entry. They bundle
+no GTK, libadwaita, or rclone. The app finds its helper relative to its own
+binary, so the same build runs from a checkout, the user installation, or a
+package.
+
+`dpkg-shlibdeps` and RPM's automatic requirements name the GTK 4, libadwaita, GLib,
+and C library versions the binary links. Both formats also require FUSE 3 and
+rclone 1.75.2 or later. Fedora 45 provides every dependency. Debian 13 and Ubuntu
+24.04 and 26.04 provide GTK and libadwaita, but their rclone predates the iCloud
+backend, so the official rclone package must be installed first. Debian 12 and
+Ubuntu 22.04 lack GTK 4.14 and libadwaita 1.5.
+
+Packages are built and checked in disposable containers. Builds receive only the
+packaged sources; checks receive tracked files, packages, and test programs.
+Neither receives `.vm/` or `downloads/`. There is no release or signed repository
+yet.
+
 ## Mount and desktop integration
 
 The user **iCloud on Linux** shortcut runs the native app. Its Connect action
@@ -211,6 +237,8 @@ with iCloud as the source and a local destination.
 | Linux desktop | `~/.local/bin/icloud-on-linux` and `~/.local/share/icloud-on-linux/` | User installation of the app and its helper; the desktop entry is under `~/.local/share/applications/`. |
 | Host | `.vm/` | Disk, identifier, installation media, keys, and administration data for the local VM. Excluded from Git and the Docker build context. |
 | Host | `downloads/` | Personal copies extracted from the container. Excluded from Git and the Docker build context. |
+| Linux system | `/usr/bin/icloud-on-linux`, `/usr/share/icloud-on-linux/`, and `/usr/share/applications/io.github.luiscuellar31.IcloudOnLinux.desktop` | Files owned by the installed package. User data stays in the per-user locations above. |
+| Host | `dist/` and `target/` | Built packages, binaries, and the package check programs. Excluded from Git. |
 
 Docker and Ubuntu configurations are independent. The prepared lab received an
 encrypted copy; credentials do not synchronize automatically between environments.
@@ -254,6 +282,11 @@ Dockerfile and the session script needed by the image to the builder.
   [tests/test_cloud_safety.py](../tests/test_cloud_safety.py): refusal of inherited
   credentials in local checks, unsafe mount points, existing cloud folders,
   paths outside the sandbox, and cleanup without verified ownership.
+- [tests/check_packages.sh](../tests/check_packages.sh): package installation and
+  the Rust checks against the installed helper in Debian, Ubuntu, and Fedora
+  containers, including headless Weston and the installed app.
+- [tests/check_wayland.sh](../tests/check_wayland.sh): the visible check under
+  headless GNOME Shell and KWin Wayland compositors, with Nautilus or Dolphin.
 - [tests/check_recovery.py](../tests/check_recovery.py): a loopback-only WebDAV
   fixture for corruption detection, interrupted uploads, persistent write cache,
   and private mount restarts. An explicit `--icloud` run checks immutable conflict

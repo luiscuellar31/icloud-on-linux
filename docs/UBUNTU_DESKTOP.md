@@ -56,6 +56,8 @@ scripts/install_desktop.sh
 Run the installer as your desktop user. It builds the app with Cargo and installs
 it, its session helper, and the **iCloud on Linux** shortcut under `~/.local/`,
 preserving your encrypted configuration. Rerun it after updating the checkout.
+Instead of building on Ubuntu, you can install the `.deb` package described in the
+[README](../README.md).
 
 Open **iCloud on Linux**, enter your local key, and select **Connect**. When the
 status shows **Connected**, **Open iCloud Drive** opens `~/iCloud` in Files.
@@ -115,6 +117,19 @@ The app does not yet synchronize edits made inside the explorer folder.
 Pending payloads and opened files are stored unencrypted in your private user
 cache. Keep enough free disk space and preserve that cache when recovering a
 pending upload. Configuration encryption protects the session, not file contents.
+
+## Desktop coverage
+
+| Desktop | Environment checked | Result |
+| --- | --- | --- |
+| GNOME 46 and Files | Ubuntu 24.04 ARM64, separate test user, headless GNOME Shell without X11 | Connect, state, an upload conflict decided with Keep both, pause on disconnect and resume, ending the app during an upload, Open with Files observed, and safe disconnect passed. |
+| KDE Plasma 5.27 KWin and Dolphin | Ubuntu 24.04 ARM64, separate test user, virtual KWin Wayland without X11 | The same controls passed, with Dolphin observed after Open. |
+| X11 | Ubuntu 24.04 ARM64, separate test user, Xvfb without a desktop shell | The same controls passed, except Open. |
+
+All checks use fictional encrypted local profiles and private FUSE mounts. The
+Wayland sessions are separate from the prepared GNOME desktop; they do not replace
+the display manager or copy account credentials. Debian, Fedora, and Ubuntu
+packages are covered by checks in containers, without a full desktop session.
 
 ## 1. Open Ubuntu Desktop
 
