@@ -33,13 +33,31 @@ impl Drop for Unmount {
     }
 }
 
-/// Whether a process with this name runs as the current user.
-fn running(name: &str) -> bool {
+/// The processes with this name that run as the current user.
+fn processes(name: &str) -> Vec<i32> {
     let uid = nix::unistd::getuid().as_raw();
-    fs::read_dir("/proc").into_iter().flatten().flatten().any(|entry| {
-        entry.metadata().is_ok_and(|metadata| metadata.uid() == uid)
-            && fs::read_to_string(entry.path().join("comm")).is_ok_and(|comm| comm.trim_end() == name)
-    })
+    fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            entry.metadata().is_ok_and(|metadata| metadata.uid() == uid)
+                && fs::read_to_string(entry.path().join("comm")).is_ok_and(|comm| comm.trim_end() == name)
+        })
+        .filter_map(|entry| entry.file_name().to_str()?.parse().ok())
+        .collect()
+}
+
+fn running(name: &str) -> bool {
+    !processes(name).is_empty()
+}
+
+/// Close the file manager that Open started, as a user closes its window before disconnecting.
+fn close(name: &str) {
+    for process in processes(name) {
+        let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(process), nix::sys::signal::Signal::SIGTERM);
+    }
+    wait(30, &format!("{name} closes"), || !running(name));
 }
 
 fn main() {
@@ -66,7 +84,7 @@ fn main() {
     let _unmount = Unmount(fixture.paths.mount.clone());
 
     // A file manager that shows the folder keeps it busy, which correctly stops a disconnect, so the uploads and
-    // ending the app come first and Open is checked last, in a new window.
+    // ending the app come first and Open is checked last, in a new window that closes the file manager first.
     {
         let (session, window) = show_window(&application, &fixture);
         ui::connect(&window, &session);
@@ -83,6 +101,7 @@ fn main() {
         wait(30, &format!("{name} starts"), || running(name));
         assert_eq!(session.state(), State::Available, "{}", session.message());
         println!("PASS: Open started {name} for the private mount.");
+        close(name);
     }
 
     let disconnect = window.window.lookup_action("disconnect").unwrap();
