@@ -11,6 +11,8 @@ BuildRequires:  gtk4-devel
 BuildRequires:  libadwaita-devel
 Requires:       rclone >= 1.75.2
 Requires:       fuse3
+# secret-tool, for Unlock automatically on this computer.
+Recommends:     libsecret
 # The stripped release binary carries no debug information to extract.
 %global debug_package %{nil}
 
