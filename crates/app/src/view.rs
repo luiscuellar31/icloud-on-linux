@@ -65,6 +65,8 @@ pub struct Facts {
     pub checking: bool,
     pub owns_mount: bool,
     pub key_typed: bool,
+    pub signed_in: bool,
+    pub renewing: bool,
     pub uploads: Uploads,
     /// The window waits for uploads to stop before disconnecting.
     pub disconnect_pending: bool,
@@ -76,6 +78,7 @@ pub struct Screen {
     pub tone: Tone,
     pub detail: Option<String>,
     pub progress: bool,
+    pub welcome: bool,
     pub key_panel: bool,
     pub connect: bool,
     pub open_visible: bool,
@@ -83,6 +86,7 @@ pub struct Screen {
     pub cancel: bool,
     pub cancel_enabled: bool,
     pub disconnect: bool,
+    pub renew: bool,
 }
 
 pub fn screen(facts: &Facts) -> Screen {
@@ -100,16 +104,21 @@ pub fn screen(facts: &Facts) -> Screen {
         State::Error => (tr!("Needs attention"), Tone::Error),
         State::Connecting => (tr!("Connecting..."), Tone::Busy),
         State::Disconnecting => (tr!("Disconnecting..."), Tone::Busy),
-        State::Disconnected => (tr!("Disconnected"), Tone::Off),
+        State::Disconnected if facts.signed_in => (tr!("Disconnected"), Tone::Off),
+        State::Disconnected => (tr!("Not signed in"), Tone::Off),
     };
     // The status line already says a normal connection is ready; the message explains anything else.
-    let detail = (!facts.message.is_empty() && !(available && facts.owns_mount)).then(|| facts.message.clone());
+    let detail = (!facts.message.is_empty()
+        && (facts.signed_in || facts.state == State::Error)
+        && !(available && facts.owns_mount))
+        .then(|| facts.message.clone());
     Screen {
         status,
         tone,
         detail,
         progress: busy,
-        key_panel: can_connect,
+        welcome: can_connect && !facts.signed_in,
+        key_panel: can_connect && facts.signed_in,
         connect: can_connect && facts.key_typed,
         open_visible: available,
         open: available && facts.mounted && facts.compatible,
@@ -118,6 +127,7 @@ pub fn screen(facts: &Facts) -> Screen {
         disconnect: !facts.disconnect_pending
             && facts.state != State::Disconnecting
             && (facts.mounted || facts.checking || facts.client),
+        renew: facts.signed_in && !facts.renewing && (can_connect || available),
     }
 }
 
@@ -208,6 +218,7 @@ mod tests {
     fn facts(state: State) -> Facts {
         Facts {
             state,
+            signed_in: true,
             message: "Fixture message".into(),
             ..Facts::default()
         }
@@ -390,5 +401,36 @@ mod tests {
         };
         assert!(screen(&failed).disconnect && !screen(&failed).key_panel);
         assert!(!screen(&facts(State::Disconnecting)).disconnect);
+    }
+
+    #[test]
+    fn without_a_saved_session_the_window_offers_sign_in_instead_of_the_key() {
+        let result = screen(&Facts {
+            signed_in: false,
+            ..facts(State::Disconnected)
+        });
+        assert_eq!(result.status, "Not signed in");
+        assert!(result.welcome && !result.key_panel && !result.renew && result.detail.is_none());
+    }
+
+    #[test]
+    fn renewal_is_offered_while_disconnected_or_connected_but_not_twice() {
+        assert!(screen(&facts(State::Disconnected)).renew);
+        let connected = Facts {
+            mounted: true,
+            compatible: true,
+            client: true,
+            owns_mount: true,
+            ..facts(State::Available)
+        };
+        assert!(screen(&connected).renew);
+        assert!(
+            !screen(&Facts {
+                renewing: true,
+                ..connected
+            })
+            .renew
+        );
+        assert!(!screen(&facts(State::Connecting)).renew);
     }
 }

@@ -165,7 +165,12 @@ impl Session {
         command
     }
 
-    fn installed(&self, name: &str) -> bool {
+    /// The `PATH` that child processes search, when it was overridden.
+    pub fn search_path(&self) -> Option<OsString> {
+        self.search_path.borrow().clone()
+    }
+
+    pub(crate) fn installed(&self, name: &str) -> bool {
         let path = self
             .search_path
             .borrow()

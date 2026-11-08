@@ -2,6 +2,7 @@
 //! start child processes, a timer calls their `tick` methods, and a `Signal` tells the window to render again.
 #![deny(unsafe_code)]
 
+pub mod auth;
 pub mod connection;
 pub mod i18n;
 pub mod paths;

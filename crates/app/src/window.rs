@@ -1,5 +1,5 @@
 //! The main window: the connection status, the local key, opening iCloud Drive in the file manager, and uploads.
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
@@ -9,6 +9,7 @@ use icloud_core::connection::Connection;
 use icloud_core::session::{Session, State};
 use icloud_core::tr;
 
+use crate::signin::SignIn;
 use crate::uploads::Uploads;
 use crate::view::{self, Facts, Tone};
 
@@ -22,16 +23,21 @@ pub struct Window {
     status: gtk::Label,
     detail: gtk::Label,
     progress: gtk::ProgressBar,
+    welcome: gtk::Box,
+    sign_in_button: gtk::Button,
     key_panel: gtk::Box,
     key: adw::PasswordEntryRow,
     connect: gtk::Button,
     open: gtk::Button,
     cancel: gtk::Button,
+    renew: gio::SimpleAction,
     disconnect: gio::SimpleAction,
     quit: gio::SimpleAction,
     closing: Cell<bool>,
+    sign_in: RefCell<Weak<SignIn>>,
     /// Disconnect waits for uploads to stop, because they use the unlocked connection.
     disconnect_pending: Cell<bool>,
+    renew_pending: Cell<bool>,
 }
 
 /// Run `action` if the part still exists; closures keep only weak references so the window can be freed.
@@ -83,6 +89,21 @@ impl Window {
             .css_classes(["suggested-action", "pill"])
             .halign(gtk::Align::Start)
             .build();
+        let welcome_title = label(&["title-3"]);
+        welcome_title.set_label(&tr!("Welcome"));
+        let welcome_text = label(&[]);
+        welcome_text.set_label(&tr!(
+            "Sign in with your Apple account to open iCloud Drive in your file manager and keep folders in sync on this computer."
+        ));
+        let sign_in_button = gtk::Button::builder()
+            .label(tr!("Sign in to iCloud"))
+            .css_classes(["suggested-action", "pill"])
+            .halign(gtk::Align::Start)
+            .build();
+        let welcome = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        welcome.append(&welcome_title);
+        welcome.append(&welcome_text);
+        welcome.append(&sign_in_button);
         let key_panel = gtk::Box::new(gtk::Orientation::Vertical, 8);
         key_panel.append(&keys);
         key_panel.append(&hint);
@@ -113,6 +134,7 @@ impl Window {
             status_row.upcast_ref::<gtk::Widget>(),
             detail.upcast_ref(),
             progress.upcast_ref(),
+            welcome.upcast_ref(),
             key_panel.upcast_ref(),
             actions.upcast_ref(),
             uploads.widget().upcast_ref(),
@@ -121,11 +143,12 @@ impl Window {
         }
 
         let menu = gio::Menu::new();
+        let actions = gio::Menu::new();
         if uploads.transfers().is_some() {
-            let files = gio::Menu::new();
-            files.append(Some(&tr!("Upload files...")), Some("win.upload"));
-            menu.append_section(None, &files);
+            actions.append(Some(&tr!("Upload files...")), Some("win.upload"));
         }
+        actions.append(Some(&tr!("Renew Apple session...")), Some("win.renew"));
+        menu.append_section(None, &actions);
         let connection = gio::Menu::new();
         connection.append(Some(&tr!("Disconnect")), Some("win.disconnect"));
         connection.append(Some(&tr!("Quit")), Some("win.quit"));
@@ -151,6 +174,8 @@ impl Window {
             .default_height(600)
             .content(&toolbar)
             .build();
+        let renew = gio::SimpleAction::new("renew", None);
+        window.add_action(&renew);
         let disconnect = gio::SimpleAction::new("disconnect", None);
         let quit = gio::SimpleAction::new("quit", None);
         window.add_action(&disconnect);
@@ -165,15 +190,20 @@ impl Window {
             status,
             detail,
             progress,
+            welcome,
+            sign_in_button,
             key_panel,
             key,
             connect,
             open,
             cancel,
+            renew,
             disconnect,
             quit,
             closing: Cell::new(false),
+            sign_in: RefCell::new(Weak::new()),
             disconnect_pending: Cell::new(false),
+            renew_pending: Cell::new(false),
         });
         this.connect_signals();
         this.render();
@@ -205,6 +235,12 @@ impl Window {
                 .connect(move || with(&weak, |window| window.uploads_idle()));
         }
         let weak = Rc::downgrade(self);
+        self.sign_in_button
+            .connect_clicked(move |_| with(&weak, |window| window.sign_in()));
+        let weak = Rc::downgrade(self);
+        self.renew
+            .connect_activate(move |_, _| with(&weak, |window| window.renew()));
+        let weak = Rc::downgrade(self);
         self.cancel
             .connect_clicked(move |_| with(&weak, |window| window.disconnect_session()));
         let weak = Rc::downgrade(self);
@@ -222,6 +258,10 @@ impl Window {
         glib::timeout_add_local(Duration::from_millis(200), move || match weak.upgrade() {
             Some(window) => {
                 window.session.tick();
+                // A cancelled sign-in ends outside the session, so closing checks on its own.
+                if window.closing.get() {
+                    window.render();
+                }
                 if window.progress.is_visible() {
                     window.progress.pulse();
                 }
@@ -250,6 +290,8 @@ impl Window {
             checking: self.session.checking(),
             owns_mount: self.session.owns_mount(),
             key_typed: typed(&self.key),
+            signed_in: std::fs::symlink_metadata(&self.session.paths().config).is_ok(),
+            renewing: self.renew_pending.get(),
             uploads: self.uploads.status(),
             disconnect_pending: self.disconnect_pending.get(),
         };
@@ -262,6 +304,7 @@ impl Window {
         self.detail.set_label(screen.detail.as_deref().unwrap_or_default());
         self.detail.set_visible(screen.detail.is_some());
         self.progress.set_visible(screen.progress);
+        self.welcome.set_visible(screen.welcome);
         self.key_panel.set_visible(screen.key_panel);
         self.connect.set_sensitive(screen.connect);
         self.open.set_visible(screen.open_visible);
@@ -270,7 +313,16 @@ impl Window {
         self.cancel.set_sensitive(screen.cancel_enabled);
         self.disconnect.set_enabled(screen.disconnect);
         self.uploads.render(self.disconnect_pending.get());
-        if self.closing.get() && !self.session.busy() && !self.disconnect_pending.get() {
+        self.renew.set_enabled(screen.renew);
+        if self.renew_pending.get() {
+            if self.session.state() == State::Error {
+                self.renew_pending.set(false);
+            } else if screen.key_panel || screen.welcome {
+                self.renew_pending.set(false);
+                self.sign_in();
+            }
+        }
+        if self.closing.get() && !self.session.busy() && !self.disconnect_pending.get() && !self.signing_in() {
             if self.session.running() || mount.is_some() {
                 // Disconnecting failed, for example because a file is open; the status explains it.
                 self.closing.set(false);
@@ -278,6 +330,45 @@ impl Window {
                 self.window.destroy();
             }
         }
+    }
+
+    fn sign_in(&self) {
+        let session = self.session.clone();
+        let dialog = SignIn::present(&self.window, self.session.clone(), move || {
+            session.set_status(State::Disconnected, tr!("Signed in. Enter your local key to connect."));
+        });
+        *self.sign_in.borrow_mut() = Rc::downgrade(&dialog);
+    }
+
+    fn signing_in(&self) -> bool {
+        self.sign_in.borrow().upgrade().is_some_and(|dialog| dialog.active())
+    }
+
+    /// Renew the Apple session; a connected app disconnects first and then opens sign-in.
+    fn renew(self: &Rc<Self>) {
+        if self.session.state() != State::Available {
+            self.sign_in();
+            return;
+        }
+        let dialog = adw::AlertDialog::builder()
+            .heading(tr!("Renew Apple session"))
+            .body(tr!(
+                "Renewing disconnects iCloud Drive until you connect again. Continue?"
+            ))
+            .close_response("cancel")
+            .default_response("cancel")
+            .build();
+        dialog.add_responses(&[("cancel", &tr!("Cancel")), ("renew", &tr!("Disconnect and renew"))]);
+        let weak = Rc::downgrade(self);
+        dialog.choose(Some(&self.window), gio::Cancellable::NONE, move |response| {
+            if response == "renew" {
+                with(&weak, |window| {
+                    window.renew_pending.set(true);
+                    window.disconnect_session();
+                    window.render();
+                });
+            }
+        });
     }
 
     fn connect_session(&self) {
@@ -326,7 +417,7 @@ impl Window {
     }
 
     fn active(&self) -> bool {
-        self.session.running() || self.session.owns_mount() || self.uploads.busy()
+        self.signing_in() || self.session.running() || self.session.owns_mount() || self.uploads.busy()
     }
 
     fn close_request(self: &Rc<Self>) -> glib::Propagation {
@@ -354,6 +445,10 @@ impl Window {
 
     /// Pause uploads and disconnect if needed, then close; `render` finishes once everything has stopped.
     fn shut_down(&self) {
+        let dialog = self.sign_in.borrow().upgrade();
+        if let Some(dialog) = dialog {
+            dialog.close();
+        }
         if self.active() {
             self.closing.set(true);
             self.disconnect_session();
