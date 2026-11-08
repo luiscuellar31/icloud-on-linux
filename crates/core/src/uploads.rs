@@ -499,7 +499,7 @@ fn open_unfollowed(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
-fn read_private_json(path: &Path) -> Result<Value> {
+pub(crate) fn read_private_json(path: &Path) -> Result<Value> {
     let info = fs::symlink_metadata(path)?;
     if !info.is_file() || !private(&info) {
         return Err(invalid("Upload metadata must be a private regular file."));

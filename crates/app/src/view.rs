@@ -1,8 +1,10 @@
-//! What the window shows for a given connection and upload queue, kept apart from the widgets so it can be tested
-//! without a display.
+//! What the window shows for a given connection, upload queue, and synced folders, kept apart from the widgets so it
+//! can be tested without a display.
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use icloud_core::session::State;
+use icloud_core::sync::{Review, State as FolderState, SyncFolder};
 use icloud_core::tr;
 use icloud_core::uploads::{State as UploadState, Upload};
 
@@ -54,6 +56,36 @@ pub fn upload_status(items: &[Upload], storage_error: bool, busy: bool) -> Uploa
     }
 }
 
+/// What the synced folders add to the status of an open connection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Folders {
+    /// No folder is synced.
+    #[default]
+    None,
+    UpToDate,
+    Syncing,
+    /// A folder stopped with an error.
+    Problem,
+    /// A folder waits for Review.
+    Review,
+}
+
+/// The most urgent folder state: a review, then a problem, then a running sync.
+pub fn folder_status(folders: &[SyncFolder]) -> Folders {
+    let any = |state: FolderState| folders.iter().any(|folder| folder.state == state);
+    if folders.iter().any(|folder| folder.attention.is_some()) {
+        Folders::Review
+    } else if any(FolderState::Error) {
+        Folders::Problem
+    } else if any(FolderState::Syncing) {
+        Folders::Syncing
+    } else if folders.is_empty() {
+        Folders::None
+    } else {
+        Folders::UpToDate
+    }
+}
+
 /// The connection facts the window reads before rendering.
 #[derive(Clone, Debug, Default)]
 pub struct Facts {
@@ -68,7 +100,8 @@ pub struct Facts {
     pub signed_in: bool,
     pub renewing: bool,
     pub uploads: Uploads,
-    /// The window waits for uploads to stop before disconnecting.
+    pub folders: Folders,
+    /// The window waits for uploads and sync to stop before disconnecting.
     pub disconnect_pending: bool,
 }
 
@@ -95,12 +128,15 @@ pub fn screen(facts: &Facts) -> Screen {
     let can_connect = !busy && !facts.mounted && !facts.client;
     let connected = |summary: String| format!("{} · {summary}", tr!("Connected"));
     let (status, tone) = match facts.state {
-        State::Available => match facts.uploads {
-            Uploads::Review => (connected(tr!("Review needed")), Tone::Warning),
-            Uploads::Problem => (connected(tr!("Upload problem")), Tone::Error),
-            Uploads::Busy => (connected(tr!("Uploading...")), Tone::Busy),
-            Uploads::Idle => (tr!("Connected"), Tone::Ok),
-        },
+        State::Available if facts.folders == Folders::Review || facts.uploads == Uploads::Review => {
+            (connected(tr!("Review needed")), Tone::Warning)
+        }
+        State::Available if facts.folders == Folders::Problem => (connected(tr!("Sync problem")), Tone::Error),
+        State::Available if facts.uploads == Uploads::Problem => (connected(tr!("Upload problem")), Tone::Error),
+        State::Available if facts.folders == Folders::Syncing => (connected(tr!("Syncing...")), Tone::Busy),
+        State::Available if facts.uploads == Uploads::Busy => (connected(tr!("Uploading...")), Tone::Busy),
+        State::Available if facts.folders == Folders::UpToDate => (connected(tr!("Up to date")), Tone::Ok),
+        State::Available => (tr!("Connected"), Tone::Ok),
         State::Error => (tr!("Needs attention"), Tone::Error),
         State::Connecting => (tr!("Connecting..."), Tone::Busy),
         State::Disconnecting => (tr!("Disconnecting..."), Tone::Busy),
@@ -198,6 +234,99 @@ pub fn upload_state(state: UploadState) -> String {
         UploadState::Conflict => tr!("Conflict"),
         UploadState::Skipped => tr!("Skipped"),
         UploadState::Error => tr!("Error"),
+    }
+}
+
+/// What the synced folder controls read before rendering.
+pub struct FolderList<'a> {
+    pub folders: &'a [SyncFolder],
+    /// The identifier of the selected folder.
+    pub selected: Option<&'a str>,
+    /// The connection is unlocked and no disconnect is pending.
+    pub unlocked: bool,
+    pub busy: bool,
+    /// The folder that is syncing now.
+    pub current: Option<&'a str>,
+    /// Whether the selected folder's local copy and its Backups exist.
+    pub local_exists: bool,
+    pub backups_exist: bool,
+    /// Why the last change to the list failed, or nothing.
+    pub message: &'a str,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct FolderControls {
+    pub add: bool,
+    pub open: bool,
+    pub sync_now: bool,
+    pub backups: bool,
+    pub stop: bool,
+    /// The folder that Review continues, when one waits for it.
+    pub review: Option<String>,
+    pub review_enabled: bool,
+    pub detail: String,
+}
+
+/// The name of a synced folder's local copy.
+pub fn folder_name(folder: &SyncFolder) -> String {
+    folder
+        .local
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
+pub fn folder_controls(list: &FolderList) -> FolderControls {
+    let selected = list
+        .selected
+        .and_then(|identifier| list.folders.iter().find(|folder| folder.identifier == identifier));
+    // The selected folder, or else the first one waiting for a review, is the one the details and Review act on.
+    let shown = selected.or_else(|| list.folders.iter().find(|folder| folder.attention.is_some()));
+    let review = shown.filter(|folder| folder.attention.is_some());
+    let mut detail = vec![list.message.to_owned()];
+    if let Some(folder) = shown.filter(|folder| !folder.message.is_empty()) {
+        detail.push(format!("{}: {}", folder_name(folder), folder.message));
+    }
+    if list.folders.is_empty() {
+        detail.push(tr!(
+            "Add an iCloud Drive folder to edit it in Files or Dolphin; changes sync both ways."
+        ));
+    }
+    FolderControls {
+        add: list.unlocked,
+        open: selected.is_some() && list.local_exists,
+        sync_now: list.unlocked && selected.is_some() && !list.busy,
+        backups: selected.is_some() && list.backups_exist,
+        stop: selected.is_some_and(|folder| list.current != Some(folder.identifier.as_str())),
+        review: review.map(|folder| folder.identifier.clone()),
+        review_enabled: list.unlocked && review.is_some(),
+        detail: detail
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
+/// The question Review asks before it continues a folder.
+pub fn review_text(review: Review, name: &str) -> String {
+    match review {
+        Review::Confirm => tr!(
+            "Apply the deletions or changes found in \"{name}\" to the other side? Files deleted from iCloud go to Recently Deleted; replaced or deleted local files are kept in Backups.",
+            name = name
+        ),
+        Review::Repair => tr!(
+            "Copy files between \"{name}\" and iCloud to restore syncing? Nothing is deleted. Where both sides differ, the iCloud version is used and the local copy is kept in Backups.",
+            name = name
+        ),
+    }
+}
+
+/// The iCloud Drive folder for a folder chosen in the mount; the whole drive or a folder elsewhere gives nothing,
+/// which adding refuses with an explanation.
+pub fn chosen_folder(mount: &Path, chosen: &Path) -> String {
+    match chosen.strip_prefix(mount) {
+        Ok(relative) if !relative.as_os_str().is_empty() => relative.to_string_lossy().into_owned(),
+        _ => String::new(),
     }
 }
 
@@ -432,5 +561,120 @@ mod tests {
             .renew
         );
         assert!(!screen(&facts(State::Connecting)).renew);
+    }
+
+    fn folder(identifier: &str, state: FolderState) -> SyncFolder {
+        let mut folder = SyncFolder::default();
+        folder.identifier = identifier.into();
+        folder.local = format!("/home/fixture/iCloud Sync/{identifier}").into();
+        folder.remote = identifier.into();
+        folder.state = state;
+        folder
+    }
+
+    #[test]
+    fn the_connected_status_puts_reviews_and_problems_before_activity() {
+        let status = |uploads, folders| {
+            let result = screen(&Facts {
+                uploads,
+                folders,
+                ..facts(State::Available)
+            });
+            (result.status, result.tone)
+        };
+        let review = ("Connected · Review needed".to_owned(), Tone::Warning);
+        assert_eq!(status(Uploads::Busy, Folders::Review), review);
+        assert_eq!(status(Uploads::Review, Folders::Problem), review);
+        assert_eq!(
+            status(Uploads::Problem, Folders::Problem),
+            ("Connected · Sync problem".into(), Tone::Error)
+        );
+        assert_eq!(
+            status(Uploads::Problem, Folders::Syncing),
+            ("Connected · Upload problem".into(), Tone::Error)
+        );
+        assert_eq!(
+            status(Uploads::Busy, Folders::Syncing),
+            ("Connected · Syncing...".into(), Tone::Busy)
+        );
+        assert_eq!(
+            status(Uploads::Busy, Folders::UpToDate),
+            ("Connected · Uploading...".into(), Tone::Busy)
+        );
+        assert_eq!(
+            status(Uploads::Idle, Folders::UpToDate),
+            ("Connected · Up to date".into(), Tone::Ok)
+        );
+        assert_eq!(status(Uploads::Idle, Folders::None), ("Connected".into(), Tone::Ok));
+        let mut folders = vec![folder("a", FolderState::UpToDate), folder("b", FolderState::Syncing)];
+        assert_eq!(folder_status(&folders), Folders::Syncing);
+        folders.push(folder("c", FolderState::Error));
+        assert_eq!(folder_status(&folders), Folders::Problem);
+        folders[0].attention = Some(Review::Confirm);
+        assert_eq!(folder_status(&folders), Folders::Review);
+        assert_eq!(folder_status(&[]), Folders::None);
+    }
+
+    #[test]
+    fn folder_controls_follow_the_selection_and_the_connection() {
+        let mut folders = vec![
+            folder("Docs", FolderState::UpToDate),
+            folder("Work", FolderState::NeedsReview),
+        ];
+        folders[0].message = "Up to date.".into();
+        folders[1].attention = Some(Review::Repair);
+        folders[1].message = "Fixture review.".into();
+        let list = |selected, unlocked| FolderList {
+            folders: &folders,
+            selected,
+            unlocked,
+            busy: false,
+            current: None,
+            local_exists: true,
+            backups_exist: false,
+            message: "",
+        };
+        // Without a selection, Review and the details concern the folder that waits.
+        let waiting = folder_controls(&list(None, true));
+        assert_eq!(waiting.review.as_deref(), Some("Work"));
+        assert!(waiting.add && waiting.review_enabled && !waiting.open && !waiting.stop && !waiting.sync_now);
+        assert_eq!(waiting.detail, "Work: Fixture review.");
+        let selected = folder_controls(&list(Some("Docs"), true));
+        assert!(selected.open && selected.sync_now && selected.stop && !selected.backups);
+        assert_eq!((selected.review, selected.detail.as_str()), (None, "Docs: Up to date."));
+        let locked = folder_controls(&list(Some("Work"), false));
+        assert!(!locked.add && !locked.sync_now && !locked.review_enabled && locked.review.is_some());
+        let running = FolderList {
+            busy: true,
+            current: Some("Docs"),
+            message: "The synced folder list could not be saved.",
+            ..list(Some("Docs"), true)
+        };
+        let running = folder_controls(&running);
+        assert!(!running.stop && !running.sync_now);
+        assert!(
+            running
+                .detail
+                .starts_with("The synced folder list could not be saved. Docs:")
+        );
+        let empty = FolderList {
+            folders: &[],
+            ..list(None, true)
+        };
+        assert_eq!(
+            folder_controls(&empty).detail,
+            "Add an iCloud Drive folder to edit it in Files or Dolphin; changes sync both ways."
+        );
+    }
+
+    #[test]
+    fn review_texts_name_the_folder_and_chosen_folders_are_relative_to_the_mount() {
+        assert!(review_text(Review::Confirm, "Docs").starts_with("Apply the deletions or changes found in \"Docs\""));
+        assert!(review_text(Review::Repair, "Docs").starts_with("Copy files between \"Docs\" and iCloud"));
+        let mount = Path::new("/home/fixture/iCloud");
+        assert_eq!(chosen_folder(mount, &mount.join("Documents/Work")), "Documents/Work");
+        assert_eq!(chosen_folder(mount, mount), "");
+        assert_eq!(chosen_folder(mount, Path::new("/home/fixture/Documents")), "");
+        assert_eq!(folder_name(&folder("Docs", FolderState::Waiting)), "Docs");
     }
 }

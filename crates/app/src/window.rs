@@ -1,4 +1,5 @@
-//! The main window: the connection status, the local key, opening iCloud Drive in the file manager, and uploads.
+//! The main window: the connection status, the local key, opening iCloud Drive in the file manager, synced folders,
+//! and uploads.
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::time::Duration;
@@ -9,6 +10,7 @@ use icloud_core::connection::Connection;
 use icloud_core::session::{Session, State};
 use icloud_core::tr;
 
+use crate::folders::Folders;
 use crate::signin::SignIn;
 use crate::uploads::Uploads;
 use crate::view::{self, Facts, Tone};
@@ -17,6 +19,7 @@ const TONES: [Tone; 5] = [Tone::Ok, Tone::Busy, Tone::Warning, Tone::Error, Tone
 
 pub struct Window {
     pub window: adw::ApplicationWindow,
+    pub folders: Rc<Folders>,
     pub uploads: Rc<Uploads>,
     session: Rc<Session>,
     dot: gtk::Label,
@@ -35,7 +38,7 @@ pub struct Window {
     quit: gio::SimpleAction,
     closing: Cell<bool>,
     sign_in: RefCell<Weak<SignIn>>,
-    /// Disconnect waits for uploads to stop, because they use the unlocked connection.
+    /// Disconnect waits for uploads and sync to stop, because they use the unlocked connection.
     disconnect_pending: Cell<bool>,
     renew_pending: Cell<bool>,
 }
@@ -117,8 +120,10 @@ impl Window {
             .label(tr!("Cancel"))
             .css_classes(["pill"])
             .build();
+        let folders = Folders::new(&session);
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         actions.append(&open);
+        actions.append(&folders.add);
         actions.append(&cancel);
         let uploads = Uploads::new(&session);
 
@@ -137,6 +142,7 @@ impl Window {
             welcome.upcast_ref(),
             key_panel.upcast_ref(),
             actions.upcast_ref(),
+            folders.widget().upcast_ref(),
             uploads.widget().upcast_ref(),
         ] {
             content.append(part);
@@ -184,6 +190,7 @@ impl Window {
 
         let this = Rc::new(Window {
             window,
+            folders,
             uploads,
             session,
             dot,
@@ -232,7 +239,13 @@ impl Window {
             let weak = Rc::downgrade(self);
             transfers
                 .idle
-                .connect(move || with(&weak, |window| window.uploads_idle()));
+                .connect(move || with(&weak, |window| window.parts_idle()));
+        }
+        if let Some(sync) = self.folders.synced() {
+            let weak = Rc::downgrade(self);
+            sync.changed.connect(move || with(&weak, |window| window.render()));
+            let weak = Rc::downgrade(self);
+            sync.idle.connect(move || with(&weak, |window| window.parts_idle()));
         }
         let weak = Rc::downgrade(self);
         self.sign_in_button
@@ -293,6 +306,7 @@ impl Window {
             signed_in: std::fs::symlink_metadata(&self.session.paths().config).is_ok(),
             renewing: self.renew_pending.get(),
             uploads: self.uploads.status(),
+            folders: self.folders.status(),
             disconnect_pending: self.disconnect_pending.get(),
         };
         let screen = view::screen(&facts);
@@ -312,6 +326,8 @@ impl Window {
         self.cancel.set_visible(screen.cancel);
         self.cancel.set_sensitive(screen.cancel_enabled);
         self.disconnect.set_enabled(screen.disconnect);
+        self.folders
+            .render(self.disconnect_pending.get(), screen.open_visible, facts.signed_in);
         self.uploads.render(self.disconnect_pending.get());
         self.renew.set_enabled(screen.renew);
         if self.renew_pending.get() {
@@ -353,7 +369,7 @@ impl Window {
         let dialog = adw::AlertDialog::builder()
             .heading(tr!("Renew Apple session"))
             .body(tr!(
-                "Renewing disconnects iCloud Drive until you connect again. Continue?"
+                "Renewing disconnects iCloud Drive and pauses syncing until you connect again. Continue?"
             ))
             .close_response("cancel")
             .default_response("cancel")
@@ -401,23 +417,29 @@ impl Window {
         });
     }
 
-    /// Pause uploads, then disconnect once they have stopped.
+    /// Pause uploads and sync, then disconnect once they have stopped.
     fn disconnect_session(&self) {
         self.disconnect_pending.set(true);
         self.uploads.pause();
-        self.uploads_idle();
+        self.folders.pause();
+        self.parts_idle();
         self.render();
     }
 
-    fn uploads_idle(&self) {
-        if self.disconnect_pending.get() && !self.uploads.busy() {
+    /// Uploads and sync both use the unlocked connection, so it closes only after both stop.
+    fn parts_idle(&self) {
+        if self.disconnect_pending.get() && !self.uploads.busy() && !self.folders.busy() {
             self.disconnect_pending.set(false);
             self.session.stop();
         }
     }
 
     fn active(&self) -> bool {
-        self.signing_in() || self.session.running() || self.session.owns_mount() || self.uploads.busy()
+        self.signing_in()
+            || self.session.running()
+            || self.session.owns_mount()
+            || self.uploads.busy()
+            || self.folders.busy()
     }
 
     fn close_request(self: &Rc<Self>) -> glib::Propagation {
@@ -443,7 +465,7 @@ impl Window {
         glib::Propagation::Stop
     }
 
-    /// Pause uploads and disconnect if needed, then close; `render` finishes once everything has stopped.
+    /// Pause uploads and sync and disconnect if needed, then close; `render` finishes once everything has stopped.
     fn shut_down(&self) {
         let dialog = self.sign_in.borrow().upgrade();
         if let Some(dialog) = dialog {

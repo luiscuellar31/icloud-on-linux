@@ -147,6 +147,16 @@ pub fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
     result
 }
 
+/// Delete a file or a folder tree without following links; a missing path is fine.
+pub fn delete_path(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(info) if info.is_dir() => fs::remove_dir_all(path),
+        Ok(_) => fs::remove_file(path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 /// Flush a folder, so that files created or renamed in it survive a crash.
 pub fn flush_directory(path: &Path) -> io::Result<()> {
     let directory = OpenOptions::new()

@@ -4,7 +4,6 @@
 //! pauses the queue until a Resume saves successfully.
 use std::cell::RefCell;
 use std::ffi::OsString;
-use std::fs;
 use std::io;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -517,12 +516,7 @@ impl Transfers {
             return Err(Failure::Io(io::ErrorKind::ResourceBusy.into()));
         }
         let root = self.inner.borrow().store.snapshots.root().to_owned();
-        match fs::symlink_metadata(&root) {
-            Ok(info) if info.is_dir() => fs::remove_dir_all(&root)?,
-            Ok(_) => fs::remove_file(&root)?,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
+        profile::delete_path(&root)?;
         let store = UploadStore::open(&root)?;
         {
             let mut inner = self.inner.borrow_mut();
@@ -995,7 +989,7 @@ impl Drop for Transfers {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::fs::Permissions;
+    use std::fs::{self, Permissions};
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 

@@ -1,7 +1,8 @@
-//! The visible window with the fictional profile: connect with the local key, upload files and decide a conflict,
-//! disconnect during an upload and resume it, and end the app during an upload; then, in a new window, connect, open
-//! the file manager, and disconnect. It runs only when `WAYLAND_DISPLAY` or `DISPLAY` is set; Open is clicked only
-//! with `--expect-file-manager NAME`, which then waits for that process to start.
+//! The visible window with the fictional profile: connect with the local key, sync a folder and continue its review,
+//! upload files and decide a conflict, disconnect during an upload and resume it, and end the app during an upload;
+//! then, in a new window, connect, open the file manager, and disconnect. It runs only when `WAYLAND_DISPLAY` or
+//! `DISPLAY` is set; Open is clicked only with `--expect-file-manager NAME`, which then waits for that process to start.
+mod folders;
 #[path = "../../../core/tests/support/mod.rs"]
 mod support;
 mod ui;
@@ -83,11 +84,13 @@ fn main() {
     fs::write(fixture.source.join("sample.txt"), "Native desktop fixture\n").unwrap();
     let _unmount = Unmount(fixture.paths.mount.clone());
 
-    // A file manager that shows the folder keeps it busy, which correctly stops a disconnect, so the uploads and
-    // ending the app come first and Open is checked last, in a new window that closes the file manager first.
+    // A file manager that shows the folder keeps it busy, which correctly stops a disconnect, so synced folders,
+    // uploads, and ending the app come first and Open is checked last, in a new window that closes the file manager
+    // first.
     {
         let (session, window) = show_window(&application, &fixture);
         ui::connect(&window, &session);
+        folders::check(&window, &fixture);
         uploads::check(&window, &session, &fixture);
         uploads::check_shut_down(&window, &session, &fixture);
     }
