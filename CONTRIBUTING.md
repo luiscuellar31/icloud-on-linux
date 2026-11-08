@@ -70,8 +70,8 @@ The Python tests replace Docker, rclone, and VirtualBox with local stand-ins. Th
 need no Apple account and do not start a VM. No linter is configured for them.
 
 The native app is written in Rust, in the Cargo workspace under `crates/`. Use a
-current stable toolchain from rustup; the workspace declares the oldest supported
-version. For changes there, run from the repository root:
+current stable toolchain from rustup; each crate declares the oldest Rust version
+it supports. For changes there, run from the repository root:
 
 ```sh
 cargo fmt --check
@@ -82,6 +82,16 @@ cargo test
 Run the tests on Linux as well: process protection and mount checks depend on it.
 Keep `unsafe` code out of the crates except where a system call requires it, and
 explain each such block in a `SAFETY` comment.
+
+When `WAYLAND_DISPLAY` is set, as in a Wayland desktop session, `cargo test` also
+runs the visible window check: it connects a fictional encrypted profile and
+disconnects. To also click Open and wait for the file manager, run:
+
+```sh
+cargo test --package icloud-on-linux --test visible -- --expect-file-manager nautilus
+```
+
+Use `dolphin` on KDE.
 
 For container or shared session changes, build the image:
 

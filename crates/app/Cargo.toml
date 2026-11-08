@@ -1,0 +1,23 @@
+[package]
+name = "icloud-on-linux"
+description = "Native iCloud Drive client for the Linux desktop"
+version.workspace = true
+edition.workspace = true
+# The GTK bindings need a newer compiler than the core library.
+rust-version = "1.92"
+license.workspace = true
+
+[dependencies]
+adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
+glib-unix = "0.22"
+gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
+icloud-core = { path = "../core" }
+nix.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# GTK runs on the thread that started it, so this check has its own main function.
+[[test]]
+name = "visible"
+harness = false

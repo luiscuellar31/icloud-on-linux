@@ -1,8 +1,9 @@
 # Architecture
 
-The project uses rclone 1.75.2 to access iCloud Drive from Linux. It currently
-provides a Docker terminal lab and a read-only FUSE mount on Ubuntu 24.04 with
-GNOME. A dedicated native interface and KDE integration are not implemented yet.
+The project uses rclone 1.75.2 to access iCloud Drive from Linux. It provides a
+Docker terminal lab, a read-only FUSE mount on Ubuntu 24.04 with GNOME, and a native
+app written in Rust with GTK4 and libadwaita that controls that mount. KDE
+integration is not implemented yet.
 
 ## Components
 
@@ -14,6 +15,9 @@ GNOME. A dedicated native interface and KDE integration are not implemented yet.
 | [scripts/linux-start.sh](../scripts/linux-start.sh) | Check the Linux environment, select the user configuration, and open or reuse `~/iCloud`. |
 | [open-ubuntu.command](../open-ubuntu.command) | Open only the VirtualBox VM identified by `.vm/uuid`; do not create or provision machines. |
 | [scripts/provision-desktop.sh](../scripts/provision-desktop.sh) | Prepare the dedicated VM desktop and shortcuts using resources from its `cidata` medium. |
+| [crates/app/src/main.rs](../crates/app/src/main.rs) | Start the app for the desktop user; GApplication keeps one running copy and shows its window when opened again. |
+| [crates/app/src/window.rs](../crates/app/src/window.rs) and [view.rs](../crates/app/src/view.rs) | Present the connection status, masked key entry, file manager opening, and safe close; `view.rs` decides what to show and is tested without a display. |
+| [scripts/install_desktop.sh](../scripts/install_desktop.sh) | Build the app with Cargo and install it, its helper, and its desktop entry for the current user. |
 | [crates/core/src/session.rs](../crates/core/src/session.rs) | Unlock the saved profile with the local key, mount iCloud Drive read-only through rclone, and disconnect only the app's own mount. |
 | [crates/core](../crates/core) | Rust library for the native app without a user interface: paths, profile and mount checks, translated text, change signals, and child processes that die with the app. |
 
@@ -61,7 +65,14 @@ session's `tick` every 200 ms to collect results and compare the kernel's mounts
 
 ## Mount and desktop integration
 
-The **iCloud Drive** shortcut runs `icloud-linux-start`, which uses the dedicated
+The user **iCloud on Linux** shortcut runs the native app. Its Connect action
+uses the existing encrypted profile; Open uses the desktop file URL handler. The
+installer hides the prepared lab shortcut for this user without changing the
+system launcher or account configuration. The desktop file is named after the
+application ID, `io.github.luiscuellar31.IcloudOnLinux`, so the desktop matches
+the app's windows to it.
+
+The legacy **iCloud Drive** shortcut runs `icloud-linux-start`, which uses the dedicated
 user configuration. If `~/iCloud` is already mounted, it opens the folder without
 starting another process or asking for the key again.
 
@@ -83,6 +94,9 @@ with iCloud as the source and a local destination.
 | Ubuntu | `~/.config/icloud-linux/rclone.conf` | Dedicated encrypted configuration with `0600` permissions, reused between sessions. |
 | Ubuntu | `~/iCloud` | Mount point, not a complete offline copy. |
 | Ubuntu | rclone VFS cache, under the user cache directory | Contents of opened files; configuration encryption does not encrypt these copies. |
+| Linux desktop | `~/.cache/icloud-on-linux/vfs/`, or the equivalent under `XDG_CACHE_HOME` | The native app's VFS cache, with the same contents and limits. |
+| Linux desktop | `$XDG_RUNTIME_DIR/icloud-on-linux/session-*/` | Private copy of the encrypted profile while connected, removed on disconnect. The runtime directory is in memory and is cleared when the user logs out. |
+| Linux desktop | `~/.local/bin/icloud-on-linux` and `~/.local/share/icloud-on-linux/` | User installation of the app and its helper; the desktop entry is under `~/.local/share/applications/`. |
 | Host | `.vm/` | Disk, identifier, installation media, keys, and administration data for the local VM. Excluded from Git and the Docker build context. |
 | Host | `downloads/` | Personal copies extracted from the container. Excluded from Git and the Docker build context. |
 
@@ -93,6 +107,11 @@ Dockerfile and the session script needed by the image to the builder.
 
 ## Where behavior is checked
 
+- [crates/core/tests](../crates/core/tests): the native session with local stand-ins
+  for rclone and FUSE, and on Linux a real read-only FUSE mount of a fictional
+  encrypted profile. [crates/app/tests/visible.rs](../crates/app/tests/visible.rs)
+  connects, opens the file manager, and disconnects in the visible window on a
+  Wayland display.
 - [tests/test_launchers.py](../tests/test_launchers.py): Docker launch, session
   creation and reuse, errors, and key handling through local stand-ins.
 - [tests/test_vm_launcher.py](../tests/test_vm_launcher.py): VM identifier validation

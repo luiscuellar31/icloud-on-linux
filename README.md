@@ -8,8 +8,9 @@ iCloud on Linux aims to make your iCloud Drive files part of your everyday Linux
 workflow. The goal is to browse, manage, and sync them from GNOME Files and KDE
 Dolphin, so you can use the iCloud storage you already have without leaving Linux.
 
-The project is in early development. You can already browse and open files in
-Ubuntu with GNOME, using rclone to connect to your account.
+The project is in early development. A native app, written in Rust with GTK4,
+connects your saved session and opens iCloud Drive in Files on Ubuntu with GNOME,
+using rclone to reach your account.
 
 ## Features
 
@@ -17,6 +18,7 @@ Ubuntu with GNOME, using rclone to connect to your account.
 - Browse iCloud Drive in GNOME Files and open files with your usual apps.
 - Download files when you open them and keep a local cache.
 - Reuse your saved session, encrypted with a separate local key.
+- Connect and disconnect from a native desktop window.
 - List and download files from a terminal through the Docker environment.
 
 The current file manager mount is read-only. Uploads, editing, synchronization,
@@ -52,7 +54,7 @@ the [Docker guide](docs/DOCKER.md) for the commands and download steps.
 
 - Upload, edit, move, and delete files from the file manager.
 - Keep folders in sync and handle conflicts and interrupted connections.
-- Add a native app for sign-in, connection status, and mounting controls.
+- Bring account setup into the native app.
 - Package and test the app for Ubuntu, Fedora, and Debian with GNOME and KDE.
 
 ## Documentation and contributions

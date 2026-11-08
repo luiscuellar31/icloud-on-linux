@@ -38,8 +38,32 @@ Checks covered the real FUSE mount and write rejection with temporary local
 files. Real account checks also covered access from Files, the read-only mount
 flags, and a downloaded file whose SHA-256 matched the copy obtained in Docker.
 
-The remaining steps prepare another Ubuntu system from scratch. They provide a
-manual foreground mount; they do not install the shortcuts from the prepared VM.
+The remaining steps prepare another Ubuntu system from scratch. After installing
+rclone, install the native app and connect there, or continue with the manual
+foreground mount.
+
+## Install the native app
+
+After steps 1 and 2 below, install the build tools, the GTK files, and a current
+Rust toolchain, then build and install the app from a checkout of this repository:
+
+```sh
+sudo apt install --yes build-essential pkg-config libgtk-4-dev libadwaita-1-dev
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+scripts/install_desktop.sh
+```
+
+Run the installer as your desktop user. It builds the app with Cargo and installs
+it, its session helper, and the **iCloud on Linux** shortcut under `~/.local/`,
+preserving your encrypted configuration. Rerun it after updating the checkout.
+
+Open **iCloud on Linux**, enter your local key, and select **Connect**. When the
+status shows **Connected**, **Open iCloud Drive** opens `~/iCloud` in Files.
+**Cancel** stops a connection attempt, and **Disconnect** in the menu unmounts the
+folder and ends its client. Close files first if disconnecting reports a busy
+folder. Closing the connected app asks whether to disconnect and close it. An
+existing read-only mount from the terminal lab can be opened or disconnected
+without entering a key.
 
 ## 1. Open Ubuntu Desktop
 

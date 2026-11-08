@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=iCloud on Linux
+Comment=Connect to iCloud Drive and open your files
+Exec=icloud-on-linux
+Icon=folder-remote
+Terminal=false
+Categories=Network;FileTransfer;
+StartupNotify=true
+StartupWMClass=icloud-on-linux
