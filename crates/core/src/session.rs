@@ -146,6 +146,11 @@ impl Session {
         self.inner.borrow().check.is_some()
     }
 
+    /// The key of the unlocked connection, to save in the desktop keyring when the user turns that on.
+    pub fn unlocked_key(&self) -> Option<Zeroizing<String>> {
+        self.unlocked().then(|| self.inner.borrow().key.clone())
+    }
+
     /// Whether a dropped connection will reconnect on its own.
     pub fn reconnecting(&self) -> bool {
         self.inner.borrow().reconnect_at.is_some()

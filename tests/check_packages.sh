@@ -57,11 +57,11 @@ if command -v apt-get >/dev/null; then
         sha256sum --check --ignore-missing --quiet SHA256SUMS)
     # Recommends stay enabled, as on a desktop.
     apt-get install --yes "$download/rclone-v1.75.2-linux-$arch.deb" ./dist/icloud-on-linux_*_"$arch".deb \
-        weston desktop-file-utils >/dev/null
+        weston desktop-file-utils dbus >/dev/null
     libraries="$(dpkg-query --show --showformat '${Package} ${Version}, ' libgtk-4-1 libadwaita-1-0)"
 else
     dnf install --assumeyes ./dist/icloud-on-linux-*."$(uname -m)".rpm weston desktop-file-utils shadow-utils \
-        util-linux < /dev/null >/dev/null
+        util-linux dbus-daemon < /dev/null >/dev/null
     libraries="$(rpm --query --queryformat '%{NAME} %{VERSION}, ' gtk4 libadwaita)"
 fi
 desktop-file-validate /usr/share/applications/io.github.luiscuellar31.IcloudOnLinux.desktop
@@ -93,7 +93,8 @@ check mkdir -p /home/checker/.local/share/applications /home/checker/.config
 printf '[Desktop Entry]\nType=Application\nName=Check files\nExec=check-files %%u\nMimeType=inode/directory;\nNoDisplay=true\n' |
     check tee /home/checker/.local/share/applications/check-files.desktop >/dev/null
 printf '[Default Applications]\ninode/directory=check-files.desktop\n' | check tee /home/checker/.config/mimeapps.list >/dev/null
-check "${wayland[@]}" /source/target/package-checks/visible-* --expect-file-manager check-files
+# The tray stand-in needs a session bus, as on a desktop.
+check "${wayland[@]}" dbus-run-session -- /source/target/package-checks/visible-* --expect-file-manager check-files
 
 # The installed app must keep running on Wayland and close on SIGTERM. The exec keeps the
 # recorded PID, so the signal reaches the app rather than a wrapper.

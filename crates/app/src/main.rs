@@ -1,7 +1,8 @@
 //! iCloud on Linux: the native app that connects iCloud Drive to the desktop.
 #![deny(unsafe_code)]
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::env;
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -69,6 +70,21 @@ fn main() -> glib::ExitCode {
     let language = i18n::apply(choice);
     prepare_gtk((choice != "auto").then_some(language));
     let application = adw::Application::builder().application_id(APP_ID).build();
+    // Login sessions start the app with this option, as the autostart entries of this app and the Python app do.
+    application.add_main_option(
+        "background",
+        glib::Char::from(0),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Stay in the tray when the app can connect on its own",
+        None,
+    );
+    let background = Rc::new(Cell::new(false));
+    let started = background.clone();
+    application.connect_handle_local_options(move |_, options| {
+        started.set(options.contains("background"));
+        ControlFlow::Continue(())
+    });
     // GApplication keeps one copy running; opening the app again shows its window.
     let shown: Rc<RefCell<Option<Rc<App>>>> = Rc::default();
     application.connect_activate(move |application| {
@@ -76,7 +92,8 @@ fn main() -> glib::ExitCode {
             app.present();
             return;
         }
-        *shown.borrow_mut() = Some(App::new(application, Session::new(paths.clone())));
+        let app = App::new(application, Session::new(paths.clone()), background.get());
+        *shown.borrow_mut() = Some(app);
     });
     application.run()
 }

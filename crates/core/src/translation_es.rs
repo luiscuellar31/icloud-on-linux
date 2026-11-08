@@ -45,6 +45,66 @@ pub static SPANISH: &[(&str, &str)] = &[
         "The file manager could not be opened. You can still disconnect safely.",
         "No se pudo abrir el gestor de archivos. Aun así puedes desconectarte de forma segura.",
     ),
+    // Background mode
+    ("Start at login", "Abrir al iniciar sesión"),
+    (
+        "Unlock automatically on this computer",
+        "Desbloquear automáticamente en este equipo",
+    ),
+    (
+        "Saves the local key in your desktop keyring, so your Linux login protects your iCloud Drive instead.",
+        "Guarda la clave local en el llavero del escritorio; así tu inicio de sesión de Linux protege tu iCloud Drive.",
+    ),
+    (
+        "Install secret-tool (libsecret-tools) to save the key in your desktop keyring.",
+        "Instala secret-tool (libsecret-tools) para guardar la clave en el llavero del escritorio.",
+    ),
+    ("Unlock automatically", "Desbloquear automáticamente"),
+    (
+        "Your local key will be saved in the desktop keyring. Anyone who can use your Linux account will be able to open your iCloud Drive without typing it. Turn this on?",
+        "Tu clave local se guardará en el llavero del escritorio. Cualquiera que pueda usar tu cuenta de Linux podrá abrir tu iCloud Drive sin escribirla. ¿Activar esta opción?",
+    ),
+    (
+        "The key could not be saved in the desktop keyring. Type it the next time you connect.",
+        "No se pudo guardar la clave en el llavero del escritorio. Escríbela la próxima vez que te conectes.",
+    ),
+    ("Renew", "Renovar"),
+    (
+        "Your Apple session may have ended. Renew it to keep syncing.",
+        "Es posible que tu sesión de Apple haya terminado. Renuévala para seguir sincronizando.",
+    ),
+    (
+        "Your Apple session ends in less than 2 days. Renew it to keep syncing.",
+        "Tu sesión de Apple termina en menos de 2 días. Renuévala para seguir sincronizando.",
+    ),
+    (
+        "Your Apple session ends in about {days} days. Renew it to keep syncing.",
+        "Tu sesión de Apple termina en unos {days} días. Renuévala para seguir sincronizando.",
+    ),
+    ("Renew your Apple session", "Renueva tu sesión de Apple"),
+    ("iCloud Drive needs attention", "iCloud Drive requiere atención"),
+    (
+        "A synced folder needs your review",
+        "Una carpeta sincronizada requiere tu revisión",
+    ),
+    ("Uploads need your decision", "Las subidas requieren tu decisión"),
+    ("Show window", "Mostrar ventana"),
+    ("iCloud on Linux is still running", "iCloud on Linux sigue en ejecución"),
+    (
+        "Syncing continues in the background. Use its icon to open the window or quit.",
+        "La sincronización continúa en segundo plano. Usa su icono para abrir la ventana o salir.",
+    ),
+    ("Keep syncing?", "¿Seguir sincronizando?"),
+    (
+        "iCloud on Linux can keep syncing after you close this window. To see it again, open iCloud on Linux from your applications.",
+        "iCloud on Linux puede seguir sincronizando después de cerrar esta ventana. Para volver a verla, abre iCloud on Linux desde tus aplicaciones.",
+    ),
+    ("Keep syncing", "Seguir sincronizando"),
+    ("Quit iCloud on Linux", "Salir de iCloud on Linux"),
+    (
+        "Quitting pauses uploads, stops syncing, and disconnects iCloud Drive. Quit now?",
+        "Al salir se pausan las subidas, se detiene la sincronización y se desconecta iCloud Drive. ¿Salir ahora?",
+    ),
     // Sign-in
     ("Sign in to iCloud", "Iniciar sesión en iCloud"),
     (
@@ -500,10 +560,5 @@ pub static SPANISH: &[(&str, &str)] = &[
     ),
     // Native dialogs
     ("Disconnect and renew", "Desconectar y renovar"),
-    ("Close iCloud on Linux", "Cerrar iCloud on Linux"),
-    (
-        "Disconnect from iCloud Drive and close the app?",
-        "¿Desconectar iCloud Drive y cerrar la app?",
-    ),
-    ("Disconnect and close", "Desconectar y cerrar"),
+    ("Turn on", "Activar"),
 ];

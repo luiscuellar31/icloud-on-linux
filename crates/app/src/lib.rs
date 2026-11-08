@@ -3,6 +3,7 @@
 pub mod app;
 pub mod folders;
 pub mod signin;
+pub mod tray;
 pub mod uploads;
 pub mod view;
 pub mod window;

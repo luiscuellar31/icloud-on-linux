@@ -1,8 +1,9 @@
 //! The visible window with the fictional profile: connect with the local key, choose another language while
-//! connected, sync a folder and continue its review, upload files and decide a conflict, disconnect during an upload
-//! and resume it, and end the app during an upload; then, in a new window, connect, reconnect after the connection
-//! drops, open the file manager, and disconnect. It runs only when `WAYLAND_DISPLAY` or `DISPLAY` is set; Open is
+//! connected, turn Start at login on and off, close the window to the tray, sync a folder and continue its review,
+//! upload files and decide a conflict, disconnect during an upload and resume it, and end the app during an upload;
+//! then, in a new window, connect, reconnect after the connection drops, open the file manager, and disconnect. It runs only when `WAYLAND_DISPLAY` or `DISPLAY` is set; Open is
 //! clicked only with `--expect-file-manager NAME`, which then waits for that process to start.
+mod background;
 mod folders;
 #[path = "../../../core/tests/support/mod.rs"]
 mod support;
@@ -94,6 +95,7 @@ fn main() {
         let app = show_app(&application, &fixture);
         ui::connect(&app.window(), &app.parts.session);
         check_language(&app, &fixture);
+        background::check(&app, &fixture);
         folders::check(&app, &fixture);
         uploads::check(&app, &fixture);
         uploads::check_shut_down(&app, &fixture);
@@ -131,7 +133,7 @@ fn main() {
 
 /// The app with a new session for the fixture, its window shown on screen.
 fn show_app(application: &adw::Application, fixture: &support::Fixture) -> Rc<App> {
-    let app = App::new(application, Session::new(fixture.paths.clone()));
+    let app = App::new(application, Session::new(fixture.paths.clone()), false);
     wait(30, "the window is shown", || app.window().window.is_mapped());
     app
 }

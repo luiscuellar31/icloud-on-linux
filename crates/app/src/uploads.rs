@@ -1,6 +1,5 @@
 //! The uploads section: the cloud folder for new files, the queue with its decisions, and the file dialog.
 use std::cell::RefCell;
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -69,7 +68,6 @@ pub struct Uploads {
     keep: gtk::Button,
     /// The window's 'Upload files...' action.
     pub action: gio::SimpleAction,
-    alerts: RefCell<BTreeSet<String>>,
 }
 
 fn button(label: String) -> gtk::Button {
@@ -168,7 +166,6 @@ impl Uploads {
             skip,
             keep,
             action: gio::SimpleAction::new("upload", None),
-            alerts: RefCell::default(),
         });
         this.connect_signals();
         this
@@ -262,14 +259,14 @@ impl Uploads {
     pub fn take_over(&self, old: &Uploads) {
         self.destination.set_text(&old.destination.text());
         self.expander.set_expanded(old.expander.is_expanded());
-        *self.alerts.borrow_mut() = old.alerts.borrow().clone();
     }
 
-    /// Show the queue. While a disconnect waits for it, no new work starts.
-    pub fn render(&self) {
+    /// Show the queue. While a disconnect waits for it, no new work starts. Returns whether an upload newly waits
+    /// for a decision or saving the queue newly failed.
+    pub fn render(&self) -> bool {
         let Some(transfers) = &self.parts.transfers else {
             self.action.set_enabled(false);
-            return;
+            return false;
         };
         let items = transfers.items();
         let signed_in = fs::symlink_metadata(&self.parts.session.paths().config).is_ok();
@@ -285,11 +282,13 @@ impl Uploads {
         self.detail.set_visible(!detail.is_empty());
         // Show the queue once for each new decision or storage failure, without reopening it after the user closes it.
         let alerts = view::upload_alerts(&items, transfers.storage_error());
-        if !alerts.is_subset(&self.alerts.borrow()) {
+        let new = !alerts.is_subset(&self.parts.told.uploads.borrow());
+        if new {
             self.expander.set_expanded(true);
         }
-        *self.alerts.borrow_mut() = alerts;
+        *self.parts.told.uploads.borrow_mut() = alerts;
         self.render_controls();
+        new
     }
 
     /// Update the rows in place, or rebuild them when rows were added or replaced.

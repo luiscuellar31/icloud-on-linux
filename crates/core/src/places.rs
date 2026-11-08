@@ -123,7 +123,7 @@ fn read(path: &Path) -> io::Result<String> {
 }
 
 /// Replace a desktop settings file atomically, keeping its permissions.
-fn replace(path: &Path, text: &str) -> io::Result<()> {
+pub(crate) fn replace(path: &Path, text: &str) -> io::Result<()> {
     let mode = fs::metadata(path).map_or(0o600, |info| info.permissions().mode() & 0o777);
     profile::replace(path, text.as_bytes(), mode)
 }

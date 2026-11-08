@@ -3,8 +3,10 @@
 #![deny(unsafe_code)]
 
 pub mod auth;
+pub mod autostart;
 pub mod connection;
 pub mod i18n;
+pub mod keyring;
 pub mod paths;
 pub mod places;
 pub mod process;

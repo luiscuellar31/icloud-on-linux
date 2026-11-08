@@ -134,11 +134,11 @@ programs, never `.vm/` or `downloads/`. Each installs the package with rclone
 1.75.2 (the verified official package on Debian and Ubuntu) and runs as an
 unprivileged user with the installed helper: the Rust tests, including a real FUSE
 mount, real bisync for synced folders, and the real rclone sign-in steps; the
-visible window under headless Weston, where Open must start a stand-in file
-manager; and the installed app, which must close on SIGTERM. Containers get
-`/dev/fuse` and `SYS_ADMIN` for the private mounts. Compiling the GTK bindings
-takes up to 2 GB of memory per job; with less, set `CARGO_BUILD_JOBS=1` before
-running both scripts.
+visible window under headless Weston on a private D-Bus session, where Open must
+start a stand-in file manager; and the installed app, which must close on SIGTERM.
+Containers get `/dev/fuse` and `SYS_ADMIN` for the private mounts. Compiling the
+GTK bindings takes up to 2 GB of memory per job; with less, set
+`CARGO_BUILD_JOBS=1` before running both scripts.
 
 To check the real GNOME and KDE Wayland compositors, run this in the dedicated VM
 as a separate test user that can read the checkout, with `gnome-shell`,

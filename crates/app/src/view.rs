@@ -171,6 +171,30 @@ pub fn screen(facts: &Facts) -> Screen {
     }
 }
 
+/// Apple sessions last about 30 days; the window warns in the last 5.
+const SESSION_DAYS: f64 = 30.0;
+const WARNING_DAYS: f64 = 5.0;
+
+/// The warning that the Apple session ends soon, from when this app last signed in, in seconds since 1970. A session
+/// signed in from the terminal has no recorded time, so it gets no estimate.
+pub fn expiry(signed_in_at: Option<i64>, now: i64) -> Option<String> {
+    let days = SESSION_DAYS - (now - signed_in_at?) as f64 / 86_400.0;
+    if days > WARNING_DAYS {
+        None
+    } else if days <= 0.0 {
+        Some(tr!("Your Apple session may have ended. Renew it to keep syncing."))
+    } else if days < 2.0 {
+        Some(tr!(
+            "Your Apple session ends in less than 2 days. Renew it to keep syncing."
+        ))
+    } else {
+        Some(tr!(
+            "Your Apple session ends in about {days} days. Renew it to keep syncing.",
+            days = days.ceil() as i64
+        ))
+    }
+}
+
 /// What the upload controls read before rendering.
 pub struct Queue<'a> {
     pub items: &'a [Upload],
@@ -386,6 +410,26 @@ mod tests {
         assert_eq!((result.status.as_str(), result.tone), ("Reconnecting...", Tone::Busy));
         assert!(result.cancel && result.cancel_enabled && !result.key_panel && !result.welcome);
         assert_eq!(result.detail.as_deref(), Some("Fixture message"));
+    }
+
+    #[test]
+    fn the_apple_session_warning_starts_five_days_before_it_ends() {
+        let (day, now) = (86_400, 1_800_000_000);
+        let warning = |age: i64| expiry(Some(now - age), now);
+        assert_eq!(warning(10 * day), None);
+        assert_eq!(warning(24 * day), None);
+        let about = |days: &str| format!("Your Apple session ends in about {days} days. Renew it to keep syncing.");
+        assert_eq!(warning(25 * day), Some(about("5")));
+        assert_eq!(warning(27 * day + day / 2), Some(about("3")));
+        assert_eq!(
+            warning(29 * day).as_deref(),
+            Some("Your Apple session ends in less than 2 days. Renew it to keep syncing.")
+        );
+        assert_eq!(
+            warning(31 * day).as_deref(),
+            Some("Your Apple session may have ended. Renew it to keep syncing.")
+        );
+        assert_eq!(expiry(None, now), None);
     }
 
     #[test]

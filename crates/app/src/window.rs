@@ -1,8 +1,9 @@
 //! The main window: the connection status, the local key, opening iCloud Drive in the file manager, synced folders,
-//! and uploads. It shows the app's parts, which keep running when a window in another language replaces it.
+//! and uploads. It shows the app's parts, which keep running when a window in another language replaces it, and while
+//! the window is closed to the tray.
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
@@ -29,6 +30,8 @@ pub struct Window {
     status: gtk::Label,
     detail: gtk::Label,
     progress: gtk::ProgressBar,
+    /// The warning that the Apple session ends soon, with Renew.
+    expiry: adw::Banner,
     welcome: gtk::Box,
     sign_in_button: gtk::Button,
     key_panel: gtk::Box,
@@ -37,6 +40,8 @@ pub struct Window {
     open: gtk::Button,
     cancel: gtk::Button,
     renew: gio::SimpleAction,
+    login: gio::SimpleAction,
+    unlock: gio::SimpleAction,
     language: gio::SimpleAction,
     disconnect: gio::SimpleAction,
     quit: gio::SimpleAction,
@@ -58,6 +63,13 @@ fn typed(field: &impl IsA<gtk::Editable>) -> bool {
     }
 }
 
+/// The current time in seconds since 1970, as `settings.ini` records sign-ins.
+fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |time| time.as_secs() as i64)
+}
+
 fn label(css: &[&str]) -> gtk::Label {
     let label = gtk::Label::builder().xalign(0.0).wrap(true).build();
     for class in css {
@@ -67,7 +79,8 @@ fn label(css: &[&str]) -> gtk::Label {
 }
 
 impl Window {
-    /// A window in the current language that shows `parts`; `app` replaces it when another language is chosen.
+    /// A window in the current language that shows `parts`; `app` renders it once it holds the window, and replaces
+    /// it when another language is chosen.
     pub(crate) fn new(application: &adw::Application, parts: &Rc<Parts>, app: Weak<App>) -> Rc<Window> {
         let dot = gtk::Label::new(Some("\u{25cf}"));
         let status = label(&["heading"]);
@@ -88,6 +101,15 @@ impl Window {
         hint.set_label(&tr!(
             "The key you chose when signing in. It is not your Apple password."
         ));
+        let unlock_check = gtk::CheckButton::builder()
+            .label(tr!("Unlock automatically on this computer"))
+            .action_name("win.unlock")
+            .tooltip_text(if parts.keyring.borrow().is_some() {
+                tr!("Saves the local key in your desktop keyring, so your Linux login protects your iCloud Drive instead.")
+            } else {
+                tr!("Install secret-tool (libsecret-tools) to save the key in your desktop keyring.")
+            })
+            .build();
         let connect = gtk::Button::builder()
             .label(tr!("Connect"))
             .css_classes(["suggested-action", "pill"])
@@ -111,6 +133,7 @@ impl Window {
         let key_panel = gtk::Box::new(gtk::Orientation::Vertical, 8);
         key_panel.append(&keys);
         key_panel.append(&hint);
+        key_panel.append(&unlock_check);
         key_panel.append(&connect);
 
         let open = gtk::Button::builder()
@@ -162,9 +185,11 @@ impl Window {
         for (code, name) in i18n::LANGUAGES {
             languages.append(Some(name), Some(&format!("win.language::{code}")));
         }
-        let language = gio::Menu::new();
-        language.append_submenu(Some(&tr!("Language")), &languages);
-        menu.append_section(None, &language);
+        let preferences = gio::Menu::new();
+        preferences.append(Some(&tr!("Start at login")), Some("win.login"));
+        preferences.append(Some(&tr!("Unlock automatically on this computer")), Some("win.unlock"));
+        preferences.append_submenu(Some(&tr!("Language")), &languages);
+        menu.append_section(None, &preferences);
         let connection = gio::Menu::new();
         connection.append(Some(&tr!("Disconnect")), Some("win.disconnect"));
         connection.append(Some(&tr!("Quit")), Some("win.quit"));
@@ -178,8 +203,14 @@ impl Window {
             .title_widget(&adw::WindowTitle::new("iCloud Drive", ""))
             .build();
         header.pack_end(&menu_button);
+        let expiry = adw::Banner::builder()
+            .button_label(tr!("Renew"))
+            .action_name("win.renew")
+            .use_markup(false)
+            .build();
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
+        toolbar.add_top_bar(&expiry);
         toolbar.set_content(Some(&adw::Clamp::builder().maximum_size(560).child(&content).build()));
 
         let window = adw::ApplicationWindow::builder()
@@ -192,6 +223,11 @@ impl Window {
             .build();
         let renew = gio::SimpleAction::new("renew", None);
         window.add_action(&renew);
+        // The menu items and the check box show and change these on and off states.
+        let login = gio::SimpleAction::new_stateful("login", None, &false.to_variant());
+        let unlock = gio::SimpleAction::new_stateful("unlock", None, &false.to_variant());
+        window.add_action(&login);
+        window.add_action(&unlock);
         let language = gio::SimpleAction::new_stateful(
             "language",
             Some(glib::VariantTy::STRING),
@@ -215,6 +251,7 @@ impl Window {
             status,
             detail,
             progress,
+            expiry,
             welcome,
             sign_in_button,
             key_panel,
@@ -223,13 +260,14 @@ impl Window {
             open,
             cancel,
             renew,
+            login,
+            unlock,
             language,
             disconnect,
             quit,
             sign_in: RefCell::new(Weak::new()),
         });
         this.connect_signals();
-        this.render();
         this
     }
 
@@ -251,6 +289,16 @@ impl Window {
         let weak = Rc::downgrade(self);
         self.renew
             .connect_activate(move |_, _| with(&weak, |window| window.renew()));
+        let weak = Rc::downgrade(self);
+        self.login.connect_change_state(move |_, state| {
+            let enabled = state.and_then(|state| state.get::<bool>());
+            with(&weak, |window| window.start_at_login(enabled == Some(true)));
+        });
+        let weak = Rc::downgrade(self);
+        self.unlock.connect_change_state(move |_, state| {
+            let enabled = state.and_then(|state| state.get::<bool>());
+            with(&weak, |window| window.set_auto_unlock(enabled == Some(true)));
+        });
         let app = self.app.clone();
         self.language.connect_change_state(move |_, state| {
             let chosen = state.and_then(|state| state.str());
@@ -266,7 +314,7 @@ impl Window {
             .connect_activate(move |_, _| with(&weak, |window| window.disconnect_session()));
         let weak = Rc::downgrade(self);
         self.quit
-            .connect_activate(move |_, _| with(&weak, |window| window.window.close()));
+            .connect_activate(move |_, _| with(&weak, |window| window.quit()));
         let weak = Rc::downgrade(self);
         self.window.connect_close_request(move |_| match weak.upgrade() {
             Some(window) => window.close_request(),
@@ -309,7 +357,7 @@ impl Window {
             owns_mount: self.session.owns_mount(),
             reconnecting: self.session.reconnecting(),
             key_typed: typed(&self.key),
-            signed_in: std::fs::symlink_metadata(&self.session.paths().config).is_ok(),
+            signed_in: parts.signed_in(),
             renewing: parts.renew_pending.get(),
             uploads: self.uploads.status(),
             folders: self.folders.status(),
@@ -332,11 +380,24 @@ impl Window {
         self.cancel.set_visible(screen.cancel);
         self.cancel.set_sensitive(screen.cancel_enabled);
         self.disconnect.set_enabled(screen.disconnect);
-        self.folders.render(screen.open_visible, facts.signed_in);
-        self.uploads.render();
+        let review = self.folders.render(screen.open_visible, facts.signed_in);
+        let decision = self.uploads.render();
         self.renew.set_enabled(screen.renew);
         // A window that is closing is not replaced.
         self.language.set_enabled(!parts.closing.get());
+        let expiry = facts
+            .signed_in
+            .then(|| view::expiry(parts.settings.apple_signed_in_at(), now()))
+            .flatten();
+        self.expiry.set_title(expiry.as_deref().unwrap_or_default());
+        self.expiry.set_revealed(expiry.is_some());
+        self.render_toggles();
+        self.remember_typed_key(facts.state);
+        self.tell(&facts, review, decision, expiry.as_deref());
+        let sync_now = parts.sync.as_ref().is_some_and(|sync| {
+            !sync.folders().is_empty() && self.session.unlocked() && !sync.busy() && !parts.disconnect_pending.get()
+        });
+        with(&self.app, |app| app.show_in_tray(&screen.status, screen.open, sync_now));
         if parts.renew_pending.get() {
             if self.session.state() == State::Error {
                 parts.renew_pending.set(false);
@@ -355,14 +416,72 @@ impl Window {
         }
     }
 
+    /// Show the state of Start at login and of Unlock automatically, and whether they can change.
+    fn render_toggles(&self) {
+        let autostart = self.parts.autostart.borrow();
+        // A source checkout has no installed entry for the login session to start.
+        self.login
+            .set_enabled(autostart.enabled() || autostart.installed().is_some());
+        self.login.set_state(&autostart.enabled().to_variant());
+        self.unlock.set_enabled(self.parts.keyring.borrow().is_some());
+        self.unlock.set_state(&self.parts.unlocks_automatically().to_variant());
+    }
+
+    /// Save the key in the keyring once the key the user typed unlocks the connection, so a mistyped one never is.
+    fn remember_typed_key(&self, state: State) {
+        let parts = &self.parts;
+        if parts.remember_key.get()
+            && let Some(key) = self.session.unlocked_key()
+        {
+            parts.remember_key.set(false);
+            with(&self.app, |app| app.store_key(&key));
+        }
+        if state != State::Connecting {
+            parts.remember_key.set(false);
+        }
+    }
+
+    /// Announce what newly needs the user while the window is hidden: a connection problem, a folder waiting for a
+    /// review, an upload waiting for a decision, and the end of the Apple session.
+    fn tell(&self, facts: &Facts, review: Option<String>, decision: bool, expiry: Option<&str>) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let told = &self.parts.told;
+        let error = facts.state == State::Error && !facts.reconnecting;
+        if error && *told.error.borrow() != facts.message {
+            app.announce("attention", &tr!("iCloud Drive needs attention"), &facts.message);
+        }
+        *told.error.borrow_mut() = match facts.state {
+            State::Error => facts.message.clone(),
+            _ => String::new(),
+        };
+        if let Some(review) = review {
+            app.announce("review", &tr!("A synced folder needs your review"), &review);
+        }
+        if decision && let Some(transfers) = &self.parts.transfers {
+            app.announce("uploads", &tr!("Uploads need your decision"), &transfers.message());
+        }
+        if let Some(expiry) = expiry
+            && !told.expiry.replace(true)
+        {
+            app.announce("expiry", &tr!("Renew your Apple session"), expiry);
+        }
+    }
+
     fn sign_in(&self) {
         // A waiting reconnection would start a connection during sign-in; signing in replaces it.
         if self.session.reconnecting() {
             self.session.stop();
         }
-        let session = self.session.clone();
+        let parts = self.parts.clone();
         let dialog = SignIn::present(&self.window, self.session.clone(), move || {
-            session.set_status(State::Disconnected, tr!("Signed in. Enter your local key to connect."));
+            // Apple sessions last about 30 days from now; the window warns before they end.
+            let _ = parts.settings.set_apple_signed_in_at(now());
+            parts.told.expiry.set(false);
+            parts
+                .session
+                .set_status(State::Disconnected, tr!("Signed in. Enter your local key to connect."));
         });
         *self.sign_in.borrow_mut() = Rc::downgrade(&dialog);
     }
@@ -404,10 +523,11 @@ impl Window {
         }
         let key = self.key.text();
         self.key.set_text("");
+        self.parts.remember_key.set(self.parts.unlocks_automatically());
         self.session.start(&key);
     }
 
-    fn open_folder(self: &Rc<Self>) {
+    pub(crate) fn open_folder(self: &Rc<Self>) {
         let Some(mount) = self.session.current_mount() else {
             return;
         };
@@ -438,27 +558,143 @@ impl Window {
         self.signing_in() || self.session.running() || self.session.owns_mount() || self.parts.busy()
     }
 
+    /// Closing the window leaves the app running in the tray while it works or is signed in. Without a tray icon,
+    /// the window asks whether to keep syncing while the app works, and closes the app otherwise.
     fn close_request(self: &Rc<Self>) -> glib::Propagation {
-        if !self.active() {
+        if self.parts.closing.get() {
+            return glib::Propagation::Stop;
+        }
+        let tray = self.app.upgrade().is_some_and(|app| app.tray_shown());
+        if tray && (self.active() || self.parts.signed_in()) {
+            self.hide_to_tray();
+        } else if self.active() {
+            self.ask_keep_syncing();
+        } else {
             return glib::Propagation::Proceed;
         }
-        if !self.parts.closing.get() {
+        glib::Propagation::Stop
+    }
+
+    /// Hide the window and keep running in the tray; the first time, say how to come back.
+    fn hide_to_tray(&self) {
+        self.window.set_visible(false);
+        if !self.parts.told.background.replace(true) {
+            with(&self.app, |app| {
+                app.announce(
+                    "background",
+                    &tr!("iCloud on Linux is still running"),
+                    &tr!("Syncing continues in the background. Use its icon to open the window or quit."),
+                )
+            });
+        }
+    }
+
+    fn ask_keep_syncing(self: &Rc<Self>) {
+        let dialog = adw::AlertDialog::builder()
+            .heading(tr!("Keep syncing?"))
+            .body(tr!(
+                "iCloud on Linux can keep syncing after you close this window. To see it again, open iCloud on Linux from your applications."
+            ))
+            .close_response("cancel")
+            .default_response("keep")
+            .build();
+        dialog.add_responses(&[
+            ("cancel", &tr!("Cancel")),
+            ("quit", &tr!("Quit")),
+            ("keep", &tr!("Keep syncing")),
+        ]);
+        dialog.set_response_appearance("keep", adw::ResponseAppearance::Suggested);
+        let weak = Rc::downgrade(self);
+        dialog.choose(Some(&self.window), gio::Cancellable::NONE, move |response| {
+            with(&weak, |window| match response.as_str() {
+                "keep" => window.window.set_visible(false),
+                "quit" => window.shut_down(),
+                _ => {}
+            })
+        });
+    }
+
+    /// Quit the app, after the user confirms while it works.
+    pub(crate) fn quit(self: &Rc<Self>) {
+        if !self.active() {
+            self.shut_down();
+            return;
+        }
+        // Quit from the tray asks too, so the window opens for the question.
+        with(&self.app, |app| app.present());
+        let dialog = adw::AlertDialog::builder()
+            .heading(tr!("Quit iCloud on Linux"))
+            .body(tr!(
+                "Quitting pauses uploads, stops syncing, and disconnects iCloud Drive. Quit now?"
+            ))
+            .close_response("cancel")
+            .default_response("cancel")
+            .build();
+        dialog.add_responses(&[("cancel", &tr!("Cancel")), ("quit", &tr!("Quit"))]);
+        dialog.set_response_appearance("quit", adw::ResponseAppearance::Destructive);
+        let weak = Rc::downgrade(self);
+        dialog.choose(Some(&self.window), gio::Cancellable::NONE, move |response| {
+            if response == "quit" {
+                with(&weak, |window| window.shut_down());
+            }
+        });
+    }
+
+    fn start_at_login(&self, enabled: bool) {
+        let autostart = self.parts.autostart.borrow();
+        // When this fails, the entry stays as it was, and so does the menu item.
+        let _ = if enabled {
+            autostart.enable()
+        } else {
+            autostart.disable()
+        };
+        self.login.set_state(&autostart.enabled().to_variant());
+    }
+
+    /// Turn automatic unlock on once the user confirms, saving the key of an unlocked connection, or turn it off and
+    /// remove the saved key.
+    fn set_auto_unlock(self: &Rc<Self>, enabled: bool) {
+        let parts = &self.parts;
+        if enabled && !parts.unlocks_automatically() {
             let dialog = adw::AlertDialog::builder()
-                .heading(tr!("Close iCloud on Linux"))
-                .body(tr!("Disconnect from iCloud Drive and close the app?"))
+                .heading(tr!("Unlock automatically"))
+                .body(tr!(
+                    "Your local key will be saved in the desktop keyring. Anyone who can use your Linux account will be able to open your iCloud Drive without typing it. Turn this on?"
+                ))
                 .close_response("cancel")
                 .default_response("cancel")
                 .build();
-            dialog.add_responses(&[("cancel", &tr!("Cancel")), ("close", &tr!("Disconnect and close"))]);
-            dialog.set_response_appearance("close", adw::ResponseAppearance::Destructive);
+            dialog.add_responses(&[("cancel", &tr!("Cancel")), ("on", &tr!("Turn on"))]);
             let weak = Rc::downgrade(self);
             dialog.choose(Some(&self.window), gio::Cancellable::NONE, move |response| {
-                if response == "close" {
-                    with(&weak, |window| window.shut_down());
-                }
+                with(&weak, |window| {
+                    if response == "on"
+                        && window.parts.settings.set_unlock_automatically(true).is_ok()
+                        && let Some(key) = window.session.unlocked_key()
+                    {
+                        with(&window.app, |app| app.store_key(&key));
+                    }
+                    window.render();
+                })
             });
+        } else if !enabled && parts.unlocks_automatically() {
+            with(&self.app, |app| app.clear_key());
+            let _ = parts.settings.set_unlock_automatically(false);
+            self.render();
         }
-        glib::Propagation::Stop
+    }
+
+    /// Say that the key could not be saved, so automatic unlock is off again.
+    pub(crate) fn key_not_saved(&self) {
+        let dialog = adw::AlertDialog::builder()
+            .heading(tr!("Unlock automatically"))
+            .body(tr!(
+                "The key could not be saved in the desktop keyring. Type it the next time you connect."
+            ))
+            .build();
+        dialog.add_responses(&[("close", &tr!("Close"))]);
+        dialog.present(Some(&self.window));
+        self.render();
     }
 
     /// Pause uploads and sync and disconnect if needed, then close; `render` finishes once everything has stopped.

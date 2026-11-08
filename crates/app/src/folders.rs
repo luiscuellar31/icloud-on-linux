@@ -1,6 +1,7 @@
 //! The synced folders section: iCloud Drive folders with local copies to edit in Files or Dolphin, their states, and
 //! the reviews they need, with Add folder beside Open.
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -355,15 +356,26 @@ impl Folders {
     }
 
     /// Show the folders. Add folder appears while connected; while a disconnect waits for sync, nothing new starts.
-    pub fn render(&self, available: bool, signed_in: bool) {
-        let Some(sync) = &self.parts.sync else {
-            return;
-        };
+    /// Returns what to announce about a folder that newly waits for a review, as a review stops that folder.
+    pub fn render(&self, available: bool, signed_in: bool) -> Option<String> {
+        let sync = self.parts.sync.as_ref()?;
         let folders = sync.folders();
         self.add.set_visible(available);
         self.section.set_visible(signed_in || !folders.is_empty());
         self.show_rows(&folders);
         self.render_controls();
+        let waiting = |folder: &&SyncFolder| folder.attention.is_some();
+        let reviews: BTreeSet<String> = folders
+            .iter()
+            .filter(waiting)
+            .map(|folder| folder.identifier.clone())
+            .collect();
+        let told = self.parts.told.reviews.replace(reviews);
+        let new = folders
+            .iter()
+            .filter(waiting)
+            .find(|folder| !told.contains(&folder.identifier))?;
+        Some(format!("{}: {}", view::folder_name(new), new.notice))
     }
 
     /// Update the rows in place, or rebuild them when folders were added or removed.
