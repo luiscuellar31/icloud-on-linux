@@ -19,7 +19,10 @@ pub enum Tone {
 }
 
 impl Tone {
-    /// The libadwaita style class for the status dot.
+    /// Every tone, so a widget can drop the style of the one it showed before.
+    pub const ALL: [Tone; 5] = [Tone::Ok, Tone::Busy, Tone::Warning, Tone::Error, Tone::Off];
+
+    /// The libadwaita style class for the status dot and the folder states.
     pub fn style(self) -> &'static str {
         match self {
             Tone::Ok => "success",
@@ -116,6 +119,8 @@ pub struct Facts {
 pub struct Screen {
     pub status: String,
     pub tone: Tone,
+    /// The status line shows, except for a plain 'Not signed in', which the welcome page replaces.
+    pub show_status: bool,
     pub detail: Option<String>,
     pub progress: bool,
     pub welcome: bool,
@@ -160,12 +165,14 @@ pub fn screen(facts: &Facts) -> Screen {
         && (facts.signed_in || facts.state == State::Error)
         && !(available && facts.owns_mount))
         .then(|| facts.message.clone());
+    let welcome = can_connect && !facts.signed_in;
     Screen {
         status,
         tone,
+        show_status: !(welcome && facts.state == State::Disconnected && !facts.reconnecting),
         detail,
         progress: busy,
-        welcome: can_connect && !facts.signed_in,
+        welcome,
         key_panel: can_connect && facts.signed_in && !facts.reconnecting,
         connect: can_connect && facts.key_typed,
         open_visible: available,
@@ -311,6 +318,20 @@ pub fn uploads_title(items: &[Upload]) -> String {
     }
 }
 
+/// The second line of the uploads row: what needs the user or what runs, then what the remaining rows wait for.
+pub fn uploads_summary(status: Uploads, items: &[Upload]) -> String {
+    let any = |state: UploadState| items.iter().any(|item| item.state == state);
+    match status {
+        Uploads::Review => tr!("Uploads need your decision"),
+        Uploads::Problem => tr!("Upload problem"),
+        Uploads::Busy => tr!("Uploading..."),
+        Uploads::Idle if any(UploadState::Paused) => upload_state(UploadState::Paused),
+        Uploads::Idle if any(UploadState::Queued) => upload_state(UploadState::Queued),
+        Uploads::Idle if any(UploadState::Completed) => upload_state(UploadState::Completed),
+        Uploads::Idle => String::new(),
+    }
+}
+
 pub fn upload_state(state: UploadState) -> String {
     match state {
         UploadState::Queued => tr!("Queued"),
@@ -361,6 +382,28 @@ pub fn folder_name(folder: &SyncFolder) -> String {
         .local
         .file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
+/// Where a synced folder's local copy is, with the home folder shown as `~`.
+pub fn folder_place(folder: &SyncFolder, home: &Path) -> String {
+    match folder.local.strip_prefix(home) {
+        Ok(inside) => format!("~/{}", inside.display()),
+        Err(_) => folder.local.display().to_string(),
+    }
+}
+
+/// The tone of a folder's state in its row: a review or an error stands out, syncing uses the accent color, and
+/// the rest stays quiet.
+pub fn folder_tone(folder: &SyncFolder) -> Tone {
+    if folder.attention.is_some() || folder.state == FolderState::NeedsReview {
+        Tone::Warning
+    } else if folder.state == FolderState::Error {
+        Tone::Error
+    } else if matches!(folder.state, FolderState::Syncing | FolderState::ChangesPending) {
+        Tone::Busy
+    } else {
+        Tone::Off
+    }
 }
 
 pub fn folder_controls(list: &FolderList) -> FolderControls {
@@ -712,6 +755,20 @@ mod tests {
     }
 
     #[test]
+    fn the_uploads_summary_names_the_most_urgent_state() {
+        let items = [row("done", UploadState::Completed), row("paused", UploadState::Paused)];
+        assert_eq!(uploads_summary(Uploads::Review, &items), "Uploads need your decision");
+        assert_eq!(uploads_summary(Uploads::Busy, &items), "Uploading...");
+        assert_eq!(uploads_summary(Uploads::Idle, &items), "Paused");
+        assert_eq!(uploads_summary(Uploads::Idle, &items[..1]), "Completed");
+        assert_eq!(
+            uploads_summary(Uploads::Idle, &[row("skipped", UploadState::Skipped)]),
+            ""
+        );
+        assert_eq!(uploads_summary(Uploads::Idle, &[]), "");
+    }
+
+    #[test]
     fn a_failed_disconnect_keeps_disconnect_available() {
         let failed = Facts {
             mounted: true,
@@ -731,6 +788,13 @@ mod tests {
         });
         assert_eq!(result.status, "Not signed in");
         assert!(result.welcome && !result.key_panel && !result.renew && result.detail.is_none());
+        // The welcome page replaces 'Not signed in', but a problem keeps its status line.
+        assert!(!result.show_status && screen(&facts(State::Disconnected)).show_status);
+        let failed = screen(&Facts {
+            signed_in: false,
+            ..facts(State::Error)
+        });
+        assert!(failed.welcome && failed.show_status);
     }
 
     #[test]
@@ -867,5 +931,22 @@ mod tests {
         assert_eq!(chosen_folder(mount, mount), "");
         assert_eq!(chosen_folder(mount, Path::new("/home/fixture/Documents")), "");
         assert_eq!(folder_name(&folder("Docs", FolderState::Waiting)), "Docs");
+    }
+
+    #[test]
+    fn folder_rows_show_the_local_copy_and_make_problems_stand_out() {
+        let mut docs = folder("Docs", FolderState::UpToDate);
+        assert_eq!(folder_place(&docs, Path::new("/home/fixture")), "~/iCloud Sync/Docs");
+        assert_eq!(
+            folder_place(&docs, Path::new("/home/other")),
+            "/home/fixture/iCloud Sync/Docs"
+        );
+        assert_eq!(folder_tone(&docs), Tone::Off);
+        docs.state = FolderState::ChangesPending;
+        assert_eq!(folder_tone(&docs), Tone::Busy);
+        docs.state = FolderState::Error;
+        assert_eq!(folder_tone(&docs), Tone::Error);
+        docs.attention = Some(Review::Confirm);
+        assert_eq!(folder_tone(&docs), Tone::Warning);
     }
 }

@@ -68,16 +68,18 @@ disconnected without entering a key.
 
 ## Use the app
 
-The window shows one status line: **Not signed in**, **Disconnected**,
-**Connecting...**, **Connected** with a summary such as **Up to date** or
-**Review needed**, **Reconnecting...**, or **Needs attention** with an explanation.
+Before the first sign-in, the window welcomes you with **Sign in to iCloud**.
+After that it shows one status line: **Disconnected**, **Connecting...**,
+**Connected** with a summary such as **Up to date** or **Review needed**,
+**Reconnecting...**, or **Needs attention** with an explanation.
 
-While connected, the window offers **Open iCloud Drive** and **Add folder**, lists
-the folders on this computer, and keeps uploads under **Uploads** at the bottom.
-The menu button at the top right holds **Upload files...**, **Renew Apple
-session...**, **Start at login**, **Unlock automatically on this computer**,
-**Language**, **Disconnect**, and **Quit**. **Language** follows the desktop
-languages by default; choose English or Español to change it at once.
+While connected, the window offers **Open iCloud Drive**, lists the folders on
+this computer with **Add folder** beside their title, and keeps uploads under
+**Uploads** at the bottom. The menu button at the top right holds **Upload
+files...**, **Renew Apple session...**, **Start at login**, **Unlock
+automatically on this computer**, **Language**, **Disconnect**, and **Quit**.
+**Language** follows the desktop languages by default; choose English or
+Español to change it at once.
 
 Closing the window keeps the app connected and syncing. On Ubuntu's GNOME, KDE,
 and other desktops with tray icons, its icon in the top bar or panel shows the
@@ -178,15 +180,16 @@ pending upload. Configuration encryption protects the session, not file contents
 The `~/iCloud` folder stays read-only. To create, edit, move, or delete files from
 Files or Dolphin, sync a folder:
 
-1. Connect inside the app, then select **Add folder** next to **Open iCloud Drive**
-   and choose a folder inside iCloud Drive. The whole drive cannot be synced.
+1. Connect inside the app, then select **Add folder** next to **Folders on this
+   computer** and choose a folder inside iCloud Drive. The whole drive cannot be
+   synced.
 2. The app copies that folder to `~/iCloud Sync/<folder name>`. Wait for **Up to date**;
    the first copy downloads every file, so check the free disk space.
 3. Work in that local folder as usual, even offline. While connected, local changes
    sync within seconds and changes from other devices within two minutes. Select
-   **Sync now** in the folder's menu, opened with a right click, to sync at once,
-   or **Sync now** on the tray icon for every folder. Syncing pauses on disconnect
-   and resumes on the next connection.
+   **Sync now** in the folder's menu, opened with its ⋮ button or a right click, to
+   sync at once, or **Sync now** on the tray icon for every folder. Syncing pauses
+   on disconnect and resumes on the next connection.
 
 If the same file changed here and elsewhere, both versions are kept: the newer
 one keeps the name, and the other ends with `.conflict1` before its extension.

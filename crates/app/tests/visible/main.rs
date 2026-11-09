@@ -1,8 +1,8 @@
 //! The visible window with the fictional profile: connect with the local key, choose another language while
 //! connected, turn Start at login on and off, close the window to the tray, sync a folder and continue its review,
 //! upload files and decide a conflict, disconnect during an upload and resume it, and end the app during an upload;
-//! then, in a new window, connect, reconnect after the connection drops, open the file manager, disconnect, save a
-//! diagnostic report, sign out of this computer, and change the Apple account. It runs only when `WAYLAND_DISPLAY`
+//! then, in a new window, connect, reconnect after the connection drops, open the file manager, disconnect, decline
+//! automatic unlock, save a diagnostic report, sign out of this computer, and change the Apple account. It runs only when `WAYLAND_DISPLAY`
 //! or `DISPLAY` is set; Open is clicked only with `--expect-file-manager NAME`, which then waits for that process to
 //! start.
 mod account;
@@ -148,7 +148,7 @@ fn show_app(application: &adw::Application, fixture: &support::Fixture) -> Rc<Ap
 fn check_language(app: &App, fixture: &support::Fixture) {
     let session = &app.parts.session;
     let window = app.window();
-    ui::find(&window, |_: &gtk::Expander| true)
+    ui::find(&window, |_: &adw::ExpanderRow| true)
         .expect("the uploads section is not shown")
         .set_expanded(true);
     let destination = |row: &adw::EntryRow| row.title().contains("Upload to");

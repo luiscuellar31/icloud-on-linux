@@ -19,6 +19,15 @@ pub fn wait(seconds: u64, what: &str, done: impl Fn() -> bool) {
     }
 }
 
+/// Let a dialog that just appeared finish opening: libadwaita 1.5 ignores a close that comes before its opening
+/// animation starts, sooner than anyone can click.
+pub fn let_open(dialog: &str) {
+    let shown = Instant::now();
+    wait(5, &format!("{dialog} finishes opening"), || {
+        shown.elapsed() > Duration::from_millis(500)
+    });
+}
+
 /// Every widget under `root`, depth first.
 fn widgets(root: &gtk::Widget) -> Vec<gtk::Widget> {
     let mut found = vec![root.clone()];

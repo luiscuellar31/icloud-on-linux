@@ -512,6 +512,7 @@ pub static SPANISH: &[(&str, &str)] = &[
     ("Sync now", "Sincronizar ahora"),
     ("Backups", "Copias de seguridad"),
     ("Stop syncing", "Dejar de sincronizar"),
+    ("Folder actions", "Acciones de la carpeta"),
     ("Review...", "Revisar..."),
     ("Waiting", "En espera"),
     ("Paused", "En pausa"),

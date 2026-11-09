@@ -70,7 +70,7 @@ pub fn check(app: &App, fixture: &Fixture) {
         .transfers
         .clone()
         .expect("the upload queue could not be opened");
-    let section = ui::find(window, |_: &gtk::Expander| true).expect("the uploads section is not shown");
+    let section = ui::find(window, |_: &adw::ExpanderRow| true).expect("the uploads section is not shown");
     section.set_expanded(true);
     let destination = |row: &adw::EntryRow| row.title().contains("Upload to");
     wait(10, "the uploads section opens", || {

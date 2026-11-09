@@ -1,5 +1,5 @@
 //! The synced folders section: iCloud Drive folders with local copies to edit in Files or Dolphin, their states, and
-//! the reviews they need, with Add folder beside Open.
+//! the reviews they need, with Add folder above the list.
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -8,11 +8,11 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use icloud_core::connection::Connection;
-use icloud_core::sync::{State as FolderState, SyncFolder};
-use icloud_core::tr;
+use icloud_core::sync::SyncFolder;
+use icloud_core::{paths, tr};
 
 use crate::app::Parts;
-use crate::view::{self, FolderList};
+use crate::view::{self, FolderList, Tone};
 use crate::window::with;
 
 /// A folder row on screen.
@@ -20,32 +20,50 @@ struct Row {
     identifier: String,
     row: adw::ActionRow,
     state: gtk::Label,
+    /// Opens the folder's menu, which a right click and the Menu key also open.
+    menu: gtk::Button,
 }
 
 impl Row {
-    fn new(folder: &SyncFolder) -> Row {
-        // Folder names are shown as typed, never as markup.
+    fn new(folder: &SyncFolder, home: &Path) -> Row {
+        // Folder names and paths are shown as typed, never as markup.
         let row = adw::ActionRow::builder().use_markup(false).build();
+        row.add_prefix(&gtk::Image::from_icon_name("folder-symbolic"));
         let state = gtk::Label::new(None);
+        let menu = gtk::Button::builder()
+            .icon_name("view-more-symbolic")
+            .tooltip_text(tr!("Folder actions"))
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        menu.update_property(&[gtk::accessible::Property::Label(&tr!("Folder actions"))]);
         row.add_suffix(&state);
+        row.add_suffix(&menu);
         let row = Row {
             identifier: folder.identifier.clone(),
             row,
             state,
+            menu,
         };
-        row.show(folder);
+        row.show(folder, home);
         row
     }
 
-    fn show(&self, folder: &SyncFolder) {
+    fn show(&self, folder: &SyncFolder, home: &Path) {
         self.row.set_title(&view::folder_name(folder));
+        self.row.set_subtitle(&view::folder_place(folder, home));
         let place = format!("{}\niCloud Drive/{}", folder.local.display(), folder.remote);
         self.row.set_tooltip_text(Some(&place));
         self.state.set_label(&folder.state.label());
         let message = (!folder.message.is_empty()).then_some(folder.message.as_str());
         self.state.set_tooltip_text(message);
-        // A folder that waits for a review or failed stands out.
-        if folder.attention.is_some() || folder.state == FolderState::Error {
+        let tone = view::folder_tone(folder);
+        for other in Tone::ALL {
+            self.state.remove_css_class(other.style());
+        }
+        self.state.add_css_class(tone.style());
+        // A folder that waits for a review or failed also stands out in bold.
+        if matches!(tone, Tone::Warning | Tone::Error) {
             self.state.add_css_class("heading");
         } else {
             self.state.remove_css_class("heading");
@@ -57,8 +75,8 @@ pub struct Folders {
     parts: Rc<Parts>,
     root: gtk::Box,
     section: gtk::Box,
-    /// 'Add folder', which the window shows beside Open.
-    pub add: gtk::Button,
+    /// 'Add folder', beside the section's title while connected.
+    add: gtk::Button,
     list: gtk::ListBox,
     rows: RefCell<Vec<Row>>,
     detail: gtk::Label,
@@ -85,8 +103,23 @@ impl Folders {
         let heading = gtk::Label::builder()
             .label(tr!("Folders on this computer"))
             .xalign(0.0)
+            .hexpand(true)
             .css_classes(["heading"])
             .build();
+        let add = gtk::Button::builder()
+            .child(
+                &adw::ButtonContent::builder()
+                    .icon_name("list-add-symbolic")
+                    .label(tr!("Add folder"))
+                    .build(),
+            )
+            .css_classes(["flat"])
+            .visible(false)
+            .build();
+        add.update_property(&[gtk::accessible::Property::Label(&tr!("Add folder"))]);
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        header.append(&heading);
+        header.append(&add);
         let list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::Single)
             .activate_on_single_click(false)
@@ -106,7 +139,7 @@ impl Folders {
             .spacing(8)
             .visible(false)
             .build();
-        section.append(&heading);
+        section.append(&header);
         section.append(&list);
         section.append(&review_row);
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -134,11 +167,6 @@ impl Folders {
         };
         let (open, sync_now, backups, stop) = (action("open"), action("sync"), action("backups"), action("stop"));
         root.insert_action_group("folder", Some(&actions));
-        let add = gtk::Button::builder()
-            .label(tr!("Add folder"))
-            .css_classes(["pill"])
-            .visible(false)
-            .build();
 
         let this = Rc::new(Folders {
             parts: parts.clone(),
@@ -182,7 +210,7 @@ impl Folders {
                 if let Some(row) = folders.list.row_at_y(y as i32) {
                     gesture.set_state(gtk::EventSequenceState::Claimed);
                     folders.list.select_row(Some(&row));
-                    folders.show_menu();
+                    folders.show_menu(&row);
                 }
             })
         });
@@ -191,7 +219,11 @@ impl Folders {
         let shortcut = gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("<Shift>F10|Menu"),
             Some(gtk::CallbackAction::new(move |_, _| {
-                with(&weak, |folders| folders.show_menu());
+                with(&weak, |folders| {
+                    if let Some(row) = folders.list.selected_row() {
+                        folders.show_menu(&row);
+                    }
+                });
                 glib::Propagation::Stop
             })),
         );
@@ -289,9 +321,9 @@ impl Folders {
         }
     }
 
-    /// Point the context menu at the selected folder.
-    fn show_menu(&self) {
-        let Some(bounds) = self.list.selected_row().and_then(|row| row.compute_bounds(&self.root)) else {
+    /// Show the selected folder's menu beside `anchor`, its row or its menu button.
+    fn show_menu(&self, anchor: &impl IsA<gtk::Widget>) {
+        let Some(bounds) = anchor.compute_bounds(&self.root) else {
             return;
         };
         let (x, y) = (bounds.x() as i32, bounds.y() as i32);
@@ -357,7 +389,7 @@ impl Folders {
 
     /// Show the folders. Add folder appears while connected; while a disconnect waits for sync, nothing new starts.
     /// Returns what to announce about a folder that newly waits for a review, as a review stops that folder.
-    pub fn render(&self, available: bool, signed_in: bool) -> Option<String> {
+    pub fn render(self: &Rc<Self>, available: bool, signed_in: bool) -> Option<String> {
         let sync = self.parts.sync.as_ref()?;
         let folders = sync.folders();
         self.add.set_visible(available);
@@ -379,7 +411,8 @@ impl Folders {
     }
 
     /// Update the rows in place, or rebuild them when folders were added or removed.
-    fn show_rows(&self, folders: &[SyncFolder]) {
+    fn show_rows(self: &Rc<Self>, folders: &[SyncFolder]) {
+        let home = paths::home();
         let same = {
             let rows = self.rows.borrow();
             rows.len() == folders.len()
@@ -390,11 +423,21 @@ impl Folders {
         };
         if !same {
             let selected = self.selected();
-            let rows: Vec<Row> = folders.iter().map(Row::new).collect();
+            let rows: Vec<Row> = folders.iter().map(|folder| Row::new(folder, &home)).collect();
             // The list announces selection changes while it changes, so the rows are not borrowed meanwhile.
             self.list.remove_all();
             for row in &rows {
                 self.list.append(&row.row);
+                let weak = Rc::downgrade(self);
+                row.menu.connect_clicked(move |button| {
+                    with(&weak, |folders| {
+                        let row = button
+                            .ancestor(gtk::ListBoxRow::static_type())
+                            .and_downcast::<gtk::ListBoxRow>();
+                        folders.list.select_row(row.as_ref());
+                        folders.show_menu(button);
+                    })
+                });
             }
             *self.rows.borrow_mut() = rows;
             let index =
@@ -404,7 +447,7 @@ impl Folders {
             }
         }
         for (row, folder) in self.rows.borrow().iter().zip(folders) {
-            row.show(folder);
+            row.show(folder, &home);
         }
         self.list.set_visible(!folders.is_empty());
     }

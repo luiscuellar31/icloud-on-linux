@@ -1,7 +1,7 @@
-//! The account part of the visible check: Sign out of this computer removes the fictional session, upload queue, and
-//! synced folders and keeps the local copy; then Change Apple account also moves the local copy to the Trash, removes
-//! the iCloud Sync place, and opens sign-in. The keyring, the sidebar places, and the Trash are stand-ins inside the
-//! fixture, so nothing of the desktop's own changes.
+//! The account part of the visible check: declining automatic unlock keeps it off; Sign out of this computer removes
+//! the fictional session, upload queue, and synced folders and keeps the local copy; then Change Apple account also
+//! moves the local copy to the Trash, removes the iCloud Sync place, and opens sign-in. The keyring, the sidebar
+//! places, and the Trash are stand-ins inside the fixture, so nothing of the desktop's own changes.
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -50,6 +50,22 @@ fn shows_text(window: &Window, part: &str) -> bool {
     ui::find(window, |label: &gtk::Label| label.label().contains(part)).is_some()
 }
 
+/// Turning on Unlock automatically beside the key asks first; declining keeps it off, and the switch shows that again.
+fn decline_unlock(window: &Window, calls: &Path) {
+    let unlock = |row: &adw::SwitchRow| row.title() == "Unlock automatically on this computer";
+    let switch = ui::find(window, unlock).expect("the unlock switch is not shown beside the key");
+    assert!(switch.is_sensitive() && !switch.is_active());
+    switch.set_active(true);
+    let turn_on = |found: &gtk::Button| found.label().as_deref() == Some("Turn on");
+    wait(10, "the confirmation is shown", || ui::find(window, turn_on).is_some());
+    ui::let_open("the confirmation");
+    button(window, "Cancel").emit_clicked();
+    wait(10, "the confirmation closes", || ui::find(window, turn_on).is_none());
+    assert!(!switch.is_active(), "the switch stayed on after declining");
+    assert!(!fs::read_to_string(calls).unwrap_or_default().contains("store"));
+    println!("PASS: the unlock switch beside the key asked first, and declining left it off.");
+}
+
 /// Run the menu `action`, check that the confirmation shows `listed`, and confirm with `accept`, moving the local
 /// copies to the Trash when `trash` is set.
 fn confirm(window: &Window, action: &str, listed: &[&str], accept: &str, trash: bool) {
@@ -90,6 +106,9 @@ pub fn check(app: &App, fixture: &Fixture) {
 
     // The upload that ending the app paused is still pending.
     assert!(transfers.items().iter().any(|item| item.state == Row::Paused));
+    // The window shows the stand-in keyring once it renders again.
+    session.changed().emit();
+    decline_unlock(&app.window(), &calls);
     ui::connect(&app.window(), session);
     let kept = sync_docs(app, fixture);
     // A synced folder and named uploads are what the diagnostic report must describe without naming.
@@ -111,6 +130,10 @@ pub fn check(app: &App, fixture: &Fixture) {
         fs::read_to_string(&calls).is_ok_and(|text| text.lines().any(|line| line == "clear"))
     });
     assert!(button(&app.window(), "Sign in to iCloud").is_drawable());
+    assert!(
+        !ui::shows(&app.window(), "Not signed in"),
+        "the welcome page repeats the status line"
+    );
     println!("PASS: Sign out removed the fictional session, uploads, and synced folders, and kept the local copy.");
 
     // Signed in again with the same profile, a folder is synced into an otherwise empty iCloud Sync.

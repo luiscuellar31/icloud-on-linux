@@ -55,7 +55,9 @@ impl Row {
 pub struct Uploads {
     parts: Rc<Parts>,
     root: gtk::Box,
-    expander: gtk::Expander,
+    /// The uploads row and, while it is expanded, the queue below it.
+    section: gtk::Box,
+    expander: adw::ExpanderRow,
     destination: adw::EntryRow,
     add: gtk::Button,
     scroller: gtk::ScrolledWindow,
@@ -98,17 +100,20 @@ impl Uploads {
             .update_property(&[gtk::accessible::Property::Description(&tr!(
                 "Upload folder relative to iCloud Drive"
             ))]);
-        let fields = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .css_classes(["boxed-list"])
-            .hexpand(true)
-            .build();
-        fields.append(&destination);
         let add = button(tr!("Add files..."));
         add.set_valign(gtk::Align::Center);
-        let destination_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        destination_row.append(&fields);
-        destination_row.append(&add);
+        // The title and summary are counts and states, never markup.
+        let expander = adw::ExpanderRow::builder()
+            .title(tr!("Uploads"))
+            .use_markup(false)
+            .build();
+        expander.add_suffix(&add);
+        expander.add_row(&destination);
+        let card = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .css_classes(["boxed-list"])
+            .build();
+        card.append(&expander);
 
         let list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::Single)
@@ -129,31 +134,37 @@ impl Uploads {
             buttons.append(control);
         }
 
-        let content = gtk::Box::builder()
+        let queue = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(8)
             .margin_top(8)
             .build();
         for part in [
-            destination_row.upcast_ref::<gtk::Widget>(),
-            scroller.upcast_ref(),
+            scroller.upcast_ref::<gtk::Widget>(),
             detail.upcast_ref(),
             buttons.upcast_ref(),
         ] {
-            content.append(part);
+            queue.append(part);
         }
-        let expander = gtk::Expander::builder()
-            .label(tr!("Uploads"))
-            .child(&content)
+        // The queue and its controls show with the expanded uploads row. Hidden, they leave the window's width alone.
+        expander
+            .bind_property("expanded", &queue, "visible")
+            .sync_create()
+            .build();
+        let section = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
             .visible(false)
             .build();
+        section.append(&card);
+        section.append(&queue);
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
         root.append(&warning);
-        root.append(&expander);
+        root.append(&section);
 
         let this = Rc::new(Uploads {
             parts: parts.clone(),
             root,
+            section,
             expander,
             destination,
             add,
@@ -177,14 +188,10 @@ impl Uploads {
         };
         let weak = Rc::downgrade(self);
         self.add
-            .connect_clicked(move |_| with(&weak, |uploads| uploads.choose()));
+            .connect_clicked(move |_| with(&weak, |uploads| uploads.add_files()));
         let weak = Rc::downgrade(self);
-        self.action.connect_activate(move |_, _| {
-            with(&weak, |uploads| {
-                uploads.expander.set_expanded(true);
-                uploads.choose();
-            })
-        });
+        self.action
+            .connect_activate(move |_, _| with(&weak, |uploads| uploads.add_files()));
         let weak = Rc::downgrade(self);
         self.list
             .connect_row_selected(move |_, _| with(&weak, |uploads| uploads.render_controls()));
@@ -220,6 +227,12 @@ impl Uploads {
         {
             transfers.add(&paths, &self.destination.text());
         }
+    }
+
+    /// Open the uploads row, so the new rows show, and ask for files.
+    fn add_files(self: &Rc<Self>) {
+        self.expander.set_expanded(true);
+        self.choose();
     }
 
     fn choose(self: &Rc<Self>) {
@@ -270,8 +283,10 @@ impl Uploads {
         };
         let items = transfers.items();
         let signed_in = fs::symlink_metadata(&self.parts.session.paths().config).is_ok();
-        self.expander.set_visible(signed_in || !items.is_empty());
-        self.expander.set_label(Some(&view::uploads_title(&items)));
+        self.section.set_visible(signed_in || !items.is_empty());
+        self.expander.set_title(&view::uploads_title(&items));
+        let status = view::upload_status(&items, transfers.storage_error(), transfers.busy());
+        self.expander.set_subtitle(&view::uploads_summary(status, &items));
         self.show_rows(&items);
         let detail = [transfers.message(), transfers.recovery_warning()]
             .into_iter()

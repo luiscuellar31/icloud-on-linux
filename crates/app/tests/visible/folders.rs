@@ -1,4 +1,5 @@
-//! The synced folders part of the visible check: add a folder, continue a review of mass deletions, and stop syncing.
+//! The synced folders part of the visible check: add a folder, open its menu from its button, continue a review of
+//! mass deletions, and stop syncing.
 //! Folders are added through the window's folders part, as its folder dialog does, because the dialog cannot be
 //! driven from a check.
 use std::fs;
@@ -62,8 +63,21 @@ pub fn check(app: &App, fixture: &Fixture) {
         "the status does not show the synced folder"
     );
     let row = ui::find(window, |row: &adw::ActionRow| row.title() == "Docs").expect("the folder is not listed");
+    assert!(
+        row.subtitle().is_some_and(|place| place.ends_with("/Docs")),
+        "the folder row does not show its local copy"
+    );
     let list = row.parent().and_downcast::<gtk::ListBox>().unwrap();
-    list.select_row(Some(&row));
+    // The row's menu button selects the folder and opens its menu, as a right click does.
+    let menu_button = |button: &gtk::Button| button.tooltip_text().as_deref() == Some("Folder actions");
+    ui::find(window, menu_button)
+        .expect("the folder has no menu button")
+        .emit_clicked();
+    let menu = || ui::find(window, |menu: &gtk::PopoverMenu| menu.is_visible());
+    wait(10, "the folder menu opens", || menu().is_some());
+    assert_eq!(list.selected_row().as_ref(), Some(row.upcast_ref::<gtk::ListBoxRow>()));
+    menu().unwrap().popdown();
+    println!("PASS: the folder's menu button selected it and opened its menu.");
 
     // Deleting most files on this computer stops sync until Review continues it.
     for index in 0..6 {

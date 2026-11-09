@@ -22,8 +22,6 @@ use crate::signin::SignIn;
 use crate::uploads::Uploads;
 use crate::view::{self, AccountData, Facts, Tone};
 
-const TONES: [Tone; 5] = [Tone::Ok, Tone::Busy, Tone::Warning, Tone::Error, Tone::Off];
-
 pub struct Window {
     pub window: adw::ApplicationWindow,
     pub folders: Rc<Folders>,
@@ -31,16 +29,19 @@ pub struct Window {
     parts: Rc<Parts>,
     session: Rc<Session>,
     app: Weak<App>,
+    status_row: gtk::Box,
     dot: gtk::Label,
     status: gtk::Label,
     detail: gtk::Label,
     progress: gtk::ProgressBar,
     /// The warning that the Apple session ends soon, with Renew.
     expiry: adw::Banner,
-    welcome: gtk::Box,
+    welcome: adw::StatusPage,
     sign_in_button: gtk::Button,
     key_panel: gtk::Box,
     key: adw::PasswordEntryRow,
+    /// Unlock automatically, beside the key; the menu item shares its action.
+    unlock_row: adw::SwitchRow,
     connect: gtk::Button,
     open: gtk::Button,
     cancel: gtk::Button,
@@ -100,48 +101,48 @@ impl Window {
         let progress = gtk::ProgressBar::new();
 
         let key = adw::PasswordEntryRow::builder().title(tr!("Local key")).build();
+        let unlock_row = adw::SwitchRow::builder()
+            .title(tr!("Unlock automatically on this computer"))
+            .subtitle(if parts.keyring.borrow().is_some() {
+                tr!("Saves the local key in your desktop keyring, so your Linux login protects your iCloud Drive instead.")
+            } else {
+                tr!("Install secret-tool (libsecret-tools) to save the key in your desktop keyring.")
+            })
+            .use_markup(false)
+            .build();
         let keys = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(["boxed-list"])
             .build();
         keys.append(&key);
+        keys.append(&unlock_row);
         let hint = label(&["dim-label", "caption"]);
         hint.set_label(&tr!(
             "The key you chose when signing in. It is not your Apple password."
         ));
-        let unlock_check = gtk::CheckButton::builder()
-            .label(tr!("Unlock automatically on this computer"))
-            .action_name("win.unlock")
-            .tooltip_text(if parts.keyring.borrow().is_some() {
-                tr!("Saves the local key in your desktop keyring, so your Linux login protects your iCloud Drive instead.")
-            } else {
-                tr!("Install secret-tool (libsecret-tools) to save the key in your desktop keyring.")
-            })
-            .build();
         let connect = gtk::Button::builder()
             .label(tr!("Connect"))
             .css_classes(["suggested-action", "pill"])
             .halign(gtk::Align::Start)
             .build();
-        let welcome_title = label(&["title-3"]);
-        welcome_title.set_label(&tr!("Welcome"));
-        let welcome_text = label(&[]);
-        welcome_text.set_label(&tr!(
-            "Sign in with your Apple account to open iCloud Drive in your file manager and keep folders in sync on this computer."
-        ));
         let sign_in_button = gtk::Button::builder()
             .label(tr!("Sign in to iCloud"))
             .css_classes(["suggested-action", "pill"])
-            .halign(gtk::Align::Start)
+            .halign(gtk::Align::Center)
             .build();
-        let welcome = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        welcome.append(&welcome_title);
-        welcome.append(&welcome_text);
-        welcome.append(&sign_in_button);
+        // The description is markup, so the translated text is escaped.
+        let welcome = adw::StatusPage::builder()
+            .icon_name("folder-remote-symbolic")
+            .title(tr!("Welcome"))
+            .description(glib::markup_escape_text(&tr!(
+                "Sign in with your Apple account to open iCloud Drive in your file manager and keep folders in sync on this computer."
+            )))
+            .child(&sign_in_button)
+            .vexpand(true)
+            .build();
         let key_panel = gtk::Box::new(gtk::Orientation::Vertical, 8);
         key_panel.append(&keys);
         key_panel.append(&hint);
-        key_panel.append(&unlock_check);
         key_panel.append(&connect);
 
         let open = gtk::Button::builder()
@@ -155,7 +156,6 @@ impl Window {
         let folders = Folders::new(parts);
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         actions.append(&open);
-        actions.append(&folders.add);
         actions.append(&cancel);
         let uploads = Uploads::new(parts);
 
@@ -222,7 +222,12 @@ impl Window {
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.add_top_bar(&expiry);
-        toolbar.set_content(Some(&adw::Clamp::builder().maximum_size(560).child(&content).build()));
+        // The content scrolls, so a long list of folders or uploads never makes the window taller than the screen.
+        let scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .child(&adw::Clamp::builder().maximum_size(560).child(&content).build())
+            .build();
+        toolbar.set_content(Some(&scroller));
 
         let window = adw::ApplicationWindow::builder()
             .application(application)
@@ -238,7 +243,7 @@ impl Window {
         for action in [&renew, &change_account, &sign_out] {
             window.add_action(action);
         }
-        // The menu items and the check box show and change these on and off states.
+        // The menu items and the unlock switch show and change these on and off states.
         let login = gio::SimpleAction::new_stateful("login", None, &false.to_variant());
         let unlock = gio::SimpleAction::new_stateful("unlock", None, &false.to_variant());
         window.add_action(&login);
@@ -264,6 +269,7 @@ impl Window {
             parts: parts.clone(),
             session: parts.session.clone(),
             app,
+            status_row,
             dot,
             status,
             detail,
@@ -273,6 +279,7 @@ impl Window {
             sign_in_button,
             key_panel,
             key,
+            unlock_row,
             connect,
             open,
             cancel,
@@ -324,6 +331,15 @@ impl Window {
         self.unlock.connect_change_state(move |_, state| {
             let enabled = state.and_then(|state| state.get::<bool>());
             with(&weak, |window| window.set_auto_unlock(enabled == Some(true)));
+        });
+        let weak = Rc::downgrade(self);
+        self.unlock_row.connect_active_notify(move |row| {
+            with(&weak, |window| {
+                // Rendering sets the switch to the saved choice; only a change by the user asks for another.
+                if row.is_active() != window.parts.unlocks_automatically() {
+                    window.unlock.change_state(&row.is_active().to_variant());
+                }
+            })
         });
         let app = self.app.clone();
         self.language.connect_change_state(move |_, state| {
@@ -398,8 +414,9 @@ impl Window {
             signing_out: parts.sign_out.get().is_some(),
         };
         let screen = view::screen(&facts);
+        self.status_row.set_visible(screen.show_status);
         self.status.set_label(&screen.status);
-        for tone in TONES {
+        for tone in Tone::ALL {
             self.dot.remove_css_class(tone.style());
         }
         self.dot.add_css_class(screen.tone.style());
@@ -472,13 +489,19 @@ impl Window {
 
     /// Show the state of Start at login and of Unlock automatically, and whether they can change.
     fn render_toggles(&self) {
-        let autostart = self.parts.autostart.borrow();
-        // A source checkout has no installed entry for the login session to start.
-        self.login
-            .set_enabled(autostart.enabled() || autostart.installed().is_some());
-        self.login.set_state(&autostart.enabled().to_variant());
+        {
+            let autostart = self.parts.autostart.borrow();
+            // A source checkout has no installed entry for the login session to start.
+            self.login
+                .set_enabled(autostart.enabled() || autostart.installed().is_some());
+            self.login.set_state(&autostart.enabled().to_variant());
+        }
+        let unlocks = self.parts.unlocks_automatically();
         self.unlock.set_enabled(self.parts.keyring.borrow().is_some());
-        self.unlock.set_state(&self.parts.unlocks_automatically().to_variant());
+        self.unlock.set_state(&unlocks.to_variant());
+        // The switch returns to the saved choice when its confirmation is declined.
+        self.unlock_row.set_sensitive(self.unlock.is_enabled());
+        self.unlock_row.set_active(unlocks);
     }
 
     /// Save the key in the keyring once the key the user typed unlocks the connection, so a mistyped one never is.
