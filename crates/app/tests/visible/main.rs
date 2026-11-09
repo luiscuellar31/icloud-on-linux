@@ -1,5 +1,5 @@
-//! The visible window with the fictional profile: connect with the local key, choose another language while
-//! connected, turn Start at login on and off, close the window to the tray, sync a folder and continue its review,
+//! The visible window with the fictional profile: connect with the local key, open About, choose another language
+//! while connected, turn Start at login on and off, close the window to the tray, sync a folder and continue its review,
 //! upload files and decide a conflict, disconnect during an upload and resume it, and end the app during an upload;
 //! then, in a new window, connect, reconnect after the connection drops, open the file manager, disconnect, decline
 //! automatic unlock, save a diagnostic report, sign out of this computer, and change the Apple account. It runs only when `WAYLAND_DISPLAY`
@@ -98,6 +98,7 @@ fn main() {
     {
         let app = show_app(&application, &fixture);
         ui::connect(&app.window(), &app.parts.session);
+        check_about(&app.window());
         check_language(&app, &fixture);
         background::check(&app, &fixture);
         folders::check(&app, &fixture);
@@ -141,6 +142,17 @@ fn show_app(application: &adw::Application, fixture: &support::Fixture) -> Rc<Ap
     let app = App::new(application, Session::new(fixture.paths.clone()), false);
     wait(30, "the window is shown", || app.window().window.is_mapped());
     app
+}
+
+/// The menu's About opens a dialog with the app's version, which closes again.
+fn check_about(window: &Window) {
+    window.window.lookup_action("about").unwrap().activate(None);
+    let about = |dialog: &adw::AboutDialog| dialog.version() == env!("CARGO_PKG_VERSION");
+    wait(10, "the About dialog opens", || ui::find(window, about).is_some());
+    ui::let_open("the About dialog");
+    ui::find(window, about).unwrap().close();
+    wait(10, "the About dialog closes", || ui::find(window, about).is_none());
+    println!("PASS: About showed the app's version.");
 }
 
 /// Choose Spanish and then English again while connected. Each choice is saved and shows a new window in that

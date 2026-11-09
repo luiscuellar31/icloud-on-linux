@@ -77,9 +77,9 @@ While connected, the window offers **Open iCloud Drive**, lists the folders on
 this computer with **Add folder** beside their title, and keeps uploads under
 **Uploads** at the bottom. The menu button at the top right holds **Upload
 files...**, **Renew Apple session...**, **Start at login**, **Unlock
-automatically on this computer**, **Language**, **Disconnect**, and **Quit**.
-**Language** follows the desktop languages by default; choose English or
-Español to change it at once.
+automatically on this computer**, **Language**, **About iCloud on Linux**,
+**Disconnect**, and **Quit**. **Language** follows the desktop languages by
+default; choose English or Español to change it at once.
 
 Closing the window keeps the app connected and syncing. On Ubuntu's GNOME, KDE,
 and other desktops with tray icons, its icon in the top bar or panel shows the

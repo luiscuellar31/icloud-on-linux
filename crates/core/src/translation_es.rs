@@ -81,6 +81,12 @@ pub static SPANISH: &[(&str, &str)] = &[
     ("Automatic", "Automático"),
     ("Save diagnostic report...", "Guardar diagnóstico..."),
     ("Save diagnostic report", "Guardar diagnóstico"),
+    ("About iCloud on Linux", "Acerca de iCloud on Linux"),
+    ("Trademarks", "Marcas registradas"),
+    (
+        "iCloud on Linux is not affiliated with Apple. iCloud and iCloud Drive are trademarks of Apple Inc.",
+        "iCloud on Linux no está afiliado con Apple. iCloud e iCloud Drive son marcas registradas de Apple Inc.",
+    ),
     ("Text files (*.txt)", "Archivos de texto (*.txt)"),
     (
         "The report could not be saved. Choose another folder.",

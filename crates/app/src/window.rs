@@ -22,6 +22,8 @@ use crate::signin::SignIn;
 use crate::uploads::Uploads;
 use crate::view::{self, AccountData, Facts, Tone};
 
+const REPOSITORY: &str = "https://github.com/luiscuellar31/icloud-on-linux";
+
 pub struct Window {
     pub window: adw::ApplicationWindow,
     pub folders: Rc<Folders>,
@@ -52,6 +54,7 @@ pub struct Window {
     unlock: gio::SimpleAction,
     language: gio::SimpleAction,
     report: gio::SimpleAction,
+    about: gio::SimpleAction,
     disconnect: gio::SimpleAction,
     quit: gio::SimpleAction,
     sign_in: RefCell<Weak<SignIn>>,
@@ -200,6 +203,7 @@ impl Window {
         preferences.append(Some(&tr!("Unlock automatically on this computer")), Some("win.unlock"));
         preferences.append_submenu(Some(&tr!("Language")), &languages);
         preferences.append(Some(&tr!("Save diagnostic report...")), Some("win.report"));
+        preferences.append(Some(&tr!("About iCloud on Linux")), Some("win.about"));
         menu.append_section(None, &preferences);
         let connection = gio::Menu::new();
         connection.append(Some(&tr!("Disconnect")), Some("win.disconnect"));
@@ -255,9 +259,10 @@ impl Window {
         );
         window.add_action(&language);
         let report = gio::SimpleAction::new("report", None);
+        let about = gio::SimpleAction::new("about", None);
         let disconnect = gio::SimpleAction::new("disconnect", None);
         let quit = gio::SimpleAction::new("quit", None);
-        for action in [&report, &disconnect, &quit] {
+        for action in [&report, &about, &disconnect, &quit] {
             window.add_action(action);
         }
         window.add_action(&uploads.action);
@@ -290,6 +295,7 @@ impl Window {
             unlock,
             language,
             report,
+            about,
             disconnect,
             quit,
             sign_in: RefCell::new(Weak::new()),
@@ -354,6 +360,9 @@ impl Window {
         let weak = Rc::downgrade(self);
         self.report
             .connect_activate(move |_, _| with(&weak, |window| window.save_report()));
+        let weak = Rc::downgrade(self);
+        self.about
+            .connect_activate(move |_, _| with(&weak, |window| window.show_about()));
         let weak = Rc::downgrade(self);
         self.disconnect
             .connect_activate(move |_, _| with(&weak, |window| window.disconnect_session()));
@@ -722,6 +731,26 @@ impl Window {
                 with(&weak, |window| window.sign_in());
             }
         });
+    }
+
+    /// Show the version, the license, the project links, and the trademark note.
+    fn show_about(&self) {
+        let about = adw::AboutDialog::builder()
+            .application_name("iCloud on Linux")
+            .application_icon("folder-remote")
+            .developer_name("Luis Cuellar")
+            .version(env!("CARGO_PKG_VERSION"))
+            .website(REPOSITORY)
+            .issue_url(format!("{REPOSITORY}/issues"))
+            .license_type(gtk::License::MitX11)
+            .copyright("© 2026 Luis Cuellar")
+            .build();
+        // Legal texts are markup, so the translated note is escaped.
+        let note = glib::markup_escape_text(&tr!(
+            "iCloud on Linux is not affiliated with Apple. iCloud and iCloud Drive are trademarks of Apple Inc."
+        ));
+        about.add_legal_section(&tr!("Trademarks"), None, gtk::License::Custom, Some(note.as_str()));
+        about.present(Some(&self.window));
     }
 
     /// Ask where to save the diagnostic report, then save it there and say whether that worked.
