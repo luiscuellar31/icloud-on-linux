@@ -30,8 +30,8 @@ fn helper() -> PathBuf {
     installed
 }
 
-/// Set what GTK reads from the environment as it starts: drawing in software unless the user chose a renderer, and
-/// `language` for GTK's own text when the user chose one in the app.
+/// Set what GTK reads from the environment as it starts: drawing the whole window in software unless the user chose a
+/// renderer, and `language` for GTK's own text when the user chose one in the app.
 #[allow(unsafe_code)]
 fn prepare_gtk(language: Option<&str>) {
     // Skipping OpenGL avoids loading the graphics driver, which costs 60 MB or more without GPU acceleration, as in
@@ -50,6 +50,11 @@ fn prepare_gtk(language: Option<&str>) {
             env::set_var("GSK_RENDERER", "cairo");
             if env::var_os(name).is_none() {
                 env::set_var(name, value);
+            }
+            // At twice the scale, GTK 4.14 repaints a pixel too little around text that changed, leaving traces of
+            // the old text. Repainting this small window whole costs no measurable time.
+            if env::var_os("GSK_DEBUG").is_none() {
+                env::set_var("GSK_DEBUG", "full-redraw");
             }
         }
         if let Some(language) = language {
