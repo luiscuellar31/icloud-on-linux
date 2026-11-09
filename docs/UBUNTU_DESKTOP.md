@@ -6,8 +6,10 @@ uses rclone installed directly on Ubuntu Desktop.
 ## Use the prepared VM
 
 The local **Ubuntu-iCloud** machine runs Ubuntu 24.04 LTS ARM64 with 4 GB RAM,
-2 CPUs, and a 40 GB dynamically allocated disk. It has rclone 1.75.2, FUSE 3,
-and an application shortcut for iCloud.
+4 CPUs, and a 40 GB dynamically allocated disk. It has rclone 1.75.2, FUSE 3,
+and an application shortcut for iCloud. The VirtualBox Guest Additions keep the
+screen at the window size, 3D acceleration is on, and Ubuntu scales the desktop
+to 200 % for the Mac's Retina display.
 
 1. On macOS, double-click [open-ubuntu.command](../open-ubuntu.command). If the
    VM is already running, select it in VirtualBox and choose **Show**.
@@ -238,11 +240,19 @@ To create a dedicated VM on an ARM64 Mac:
 2. In VirtualBox, create a machine, for example **Ubuntu-iCloud**.
 3. Select the ISO and Ubuntu ARM64. Use manual installation; VirtualBox does not
    provide unattended installation for ARM guests.
-4. The tested VM uses Ubuntu 24.04 LTS with 4 GB RAM and 2 CPUs. Leave enough
+4. The tested VM uses Ubuntu 24.04 LTS with 4 GB RAM and 4 CPUs. Leave enough
    resources for macOS and keep VirtualBox resource indicators in the green range.
    Check the requirements before choosing a different Ubuntu version.
 5. Create a new 40 GB dynamically allocated disk. Preserve other VM disks.
 6. Start that machine, install Ubuntu on its new disk, and enter the desktop.
+7. For a sharp picture on a Retina display, install the Guest Additions: run
+   `sudo apt install --yes build-essential linux-headers-$(uname -r)` in Ubuntu,
+   choose **Devices > Insert Guest Additions CD Image** in VirtualBox, and run
+   `sudo sh /media/$USER/VBox_GAs_*/VBoxLinuxAdditions-arm64.run`. Then shut down
+   the VM, turn on **3D Acceleration** in its display settings (experimental on
+   ARM Macs), and start it again. Keep **View > Auto-resize Guest Display** on at
+   the default 100 % scale, and set **Settings > Displays > Scale** to 200 % in
+   Ubuntu.
 
 ## 2. Install FUSE and the tested rclone version
 
