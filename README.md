@@ -2,6 +2,11 @@
   <h1>iCloud on Linux</h1>
 
   <p><strong>A lightweight, native iCloud Drive client for the Linux desktop, written in Rust.</strong></p>
+
+  <picture>
+    <source media='(prefers-color-scheme: dark)' srcset='docs/screenshots/connected-dark.png'>
+    <img src='docs/screenshots/connected-light.png' width='642' alt='The iCloud on Linux window, connected and up to date, with three synced folders and the uploads row'>
+  </picture>
 </div>
 
 iCloud on Linux makes your iCloud Drive files part of your everyday Linux workflow.
